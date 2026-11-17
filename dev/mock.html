@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es">
+<head><script type="importmap">{"imports":{"https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm":"/dev/mock-supabase.js"}}</script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Amigos Fit</title>
+  <meta name="description" content="Entrena, aliméntate y progresa junto a tus amigos." />
+  <meta name="theme-color" content="#16a34a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Amigos Fit" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="stylesheet" href="/css/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+</head>
+<body>
+  <div id="app"><div class="loading">Cargando…</div></div>
+  <nav id="nav" class="bottom-nav hidden">
+    <a href="#/hoy" data-route="hoy"><span>🍽️</span>Hoy</a>
+    <a href="#/progreso" data-route="progreso"><span>📈</span>Progreso</a>
+    <a href="#/registrar" data-route="registrar" class="nav-add"><span>📷</span>Registrar</a>
+    <a href="#/amigos" data-route="amigos"><span>👥</span>Amigos</a>
+    <a href="#/perfil" data-route="perfil"><span>⚙️</span>Perfil</a>
+  </nav>
+  <div id="toast" class="toast hidden"></div>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

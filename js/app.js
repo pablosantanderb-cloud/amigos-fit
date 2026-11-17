@@ -1,0 +1,878 @@
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+import * as C from './calc.js';
+
+// ---------------------------------------------------------------- utilidades
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const app = $('#app');
+const nav = $('#nav');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const r0 = (n) => Math.round(Number(n) || 0);
+const r1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
+const fmt = (n) => r0(n).toLocaleString('es-CL');
+const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
+const BASE_URL = location.origin + location.pathname;
+
+const MEALS = { desayuno: 'Desayuno', almuerzo: 'Almuerzo', colacion: 'Colación', cena: 'Cena', otro: 'Otros / bebidas' };
+const COLORS = { kcal: '#16a34a', prot: '#2563eb', carb: '#d97706', fat: '#db2777', target: '#6b7280' };
+const PALETTE = ['#16a34a', '#2563eb', '#db2777', '#d97706', '#7c3aed', '#0891b2', '#dc2626', '#65a30d', '#c026d3', '#0f766e'];
+
+function toast(msg, isError = false) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = 'toast' + (isError ? ' error' : '');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.add('hidden'), isError ? 5000 : 2500);
+}
+
+function busy(btn, on, label) {
+  if (!btn) return;
+  if (on) { btn._label = btn.innerHTML; btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> ${label || ''}`; }
+  else { btn.disabled = false; btn.innerHTML = btn._label ?? btn.innerHTML; }
+}
+
+function prettyDate(iso) {
+  const today = C.isoDate();
+  if (iso === today) return 'Hoy';
+  if (iso === C.addDays(today, -1)) return 'Ayer';
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'short' });
+}
+const shortDate = (iso) => { const [, m, d] = iso.split('-'); return `${d}/${m}`; };
+
+function defaultMeal() {
+  const h = new Date().getHours();
+  if (h < 11) return 'desayuno';
+  if (h < 16) return 'almuerzo';
+  if (h < 19) return 'colacion';
+  return 'cena';
+}
+
+// Charts: se destruyen al cambiar de vista
+let charts = [];
+function chart(canvas, config) {
+  if (!window.Chart) return null;
+  const c = new window.Chart(canvas, config);
+  charts.push(c);
+  return c;
+}
+function clearCharts() { charts.forEach((c) => c.destroy()); charts = []; }
+const gridColor = () => (matchMedia('(prefers-color-scheme: dark)').matches ? '#263040' : '#eef0f3');
+const tickColor = () => (matchMedia('(prefers-color-scheme: dark)').matches ? '#9ca3af' : '#6b7280');
+
+// ---------------------------------------------------------------- estado
+let sb = null;
+let session = null;
+let profile = null;
+let recoveryMode = false;
+const state = { date: C.isoDate(), range: 30, groupId: localStorage.getItem('af_group') || null, groupRange: 7 };
+
+// ---------------------------------------------------------------- arranque
+async function init() {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    app.innerHTML = `<div class="auth-wrap card"><h2>Falta configuración</h2>
+      <p>Completa <code>js/config.js</code> con la URL y la anon key de tu proyecto Supabase (ver README).</p></div>`;
+    return;
+  }
+
+  // Errores que vienen en el link del correo (ej. link expirado)
+  const hashParams = new URLSearchParams(location.hash.replace(/^#\/?/, ''));
+  const linkError = hashParams.get('error_description');
+  if (location.hash.includes('type=recovery')) recoveryMode = true;
+
+  sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, detectSessionInUrl: true } });
+
+  sb.auth.onAuthStateChange((event, s) => {
+    session = s;
+    if (event === 'PASSWORD_RECOVERY') { recoveryMode = true; route(); }
+    if (event === 'SIGNED_OUT') { profile = null; route(); }
+  });
+
+  const { data } = await sb.auth.getSession();
+  session = data.session;
+  if (linkError) { history.replaceState(null, '', BASE_URL + '#/login'); setTimeout(() => toast(linkError.replace(/\+/g, ' '), true), 300); }
+  else if (/access_token|type=/.test(location.hash)) history.replaceState(null, '', BASE_URL + '#/hoy');
+
+  window.addEventListener('hashchange', route);
+  route();
+}
+
+async function loadProfile() {
+  const { data, error } = await sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
+  if (error) throw error;
+  profile = data;
+  return profile;
+}
+
+const profileComplete = () => profile && profile.kcal_target && profile.weight_kg;
+
+async function route() {
+  clearCharts();
+  const name = (location.hash.replace(/^#\/?/, '').split('?')[0] || 'hoy');
+
+  if (recoveryMode && session) return viewNewPassword();
+  if (!session) { nav.classList.add('hidden'); return viewAuth(['registro', 'recuperar'].includes(name) ? name : 'login'); }
+
+  try { if (!profile) await loadProfile(); }
+  catch (e) { app.innerHTML = `<div class="card err">Error cargando perfil: ${esc(e.message)}</div>`; return; }
+
+  if (!profileComplete() && name !== 'perfil') { location.hash = '#/perfil'; return; }
+
+  nav.classList.toggle('hidden', !profileComplete());
+  $$('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === name));
+
+  const views = { hoy: viewToday, registrar: viewRegister, progreso: viewProgress, amigos: viewFriends, perfil: viewProfile };
+  const v = views[name] || viewToday;
+  app.innerHTML = '<div class="loading">Cargando…</div>';
+  try { await v(); window.scrollTo(0, 0); }
+  catch (e) { console.error(e); app.innerHTML = `<div class="card err">Ocurrió un error: ${esc(e.message)}</div>`; }
+}
+
+// ---------------------------------------------------------------- AUTH
+function viewAuth(mode) {
+  const titles = { login: 'Iniciar sesión', registro: 'Crear cuenta', recuperar: 'Recuperar contraseña' };
+  app.innerHTML = `
+  <div class="auth-wrap">
+    <div class="brand"><div class="logo">💪</div><h1>Amigos Fit</h1>
+      <p class="muted">Entrena, aliméntate y progresa junto a tus amigos.</p></div>
+    <div class="card">
+      ${mode !== 'recuperar' ? `<div class="tabs">
+        <button data-m="login" class="${mode === 'login' ? 'active' : ''}">Ingresar</button>
+        <button data-m="registro" class="${mode === 'registro' ? 'active' : ''}">Crear cuenta</button></div>` : `<h2>${titles[mode]}</h2>
+        <p class="muted small">Te enviaremos un correo con un enlace para crear una nueva contraseña.</p>`}
+      <form id="f">
+        ${mode === 'registro' ? `<label>Nombre (lo verán tus amigos)</label><input name="name" required maxlength="40" autocomplete="name">` : ''}
+        <label>Correo</label><input name="email" type="email" required autocomplete="email">
+        ${mode !== 'recuperar' ? `<label>Contraseña</label>
+          <input name="password" type="password" required minlength="6" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}">` : ''}
+        <p id="msg" class="small"></p>
+        <button class="btn block" type="submit">${mode === 'login' ? 'Ingresar' : mode === 'registro' ? 'Crear cuenta' : 'Enviar enlace'}</button>
+      </form>
+      <p class="small" style="text-align:center;margin-top:14px">
+        ${mode === 'login' ? `<a href="#/recuperar">¿Olvidaste tu contraseña?</a>` : mode === 'recuperar' ? `<a href="#/login">Volver a ingresar</a>` : ''}
+      </p>
+    </div>
+  </div>`;
+
+  $$('.tabs button').forEach((b) => (b.onclick = () => { location.hash = '#/' + b.dataset.m; }));
+  $('#f').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const f = Object.fromEntries(new FormData(ev.target));
+    const btn = ev.target.querySelector('button[type=submit]');
+    const msg = $('#msg');
+    msg.className = 'small'; msg.textContent = '';
+    busy(btn, true);
+    try {
+      if (mode === 'login') {
+        const { error } = await sb.auth.signInWithPassword({ email: f.email, password: f.password });
+        if (error) throw error;
+        profile = null; location.hash = '#/hoy'; route();
+      } else if (mode === 'registro') {
+        const { data, error } = await sb.auth.signUp({
+          email: f.email, password: f.password,
+          options: { data: { display_name: f.name.trim() }, emailRedirectTo: BASE_URL },
+        });
+        if (error) throw error;
+        if (data.session) { profile = null; location.hash = '#/perfil'; route(); }
+        else { msg.textContent = '✅ Revisa tu correo y confirma tu cuenta para poder ingresar.'; }
+      } else {
+        const { error } = await sb.auth.resetPasswordForEmail(f.email, { redirectTo: BASE_URL });
+        if (error) throw error;
+        msg.textContent = '✅ Si el correo está registrado, te llegará un enlace para restablecer la contraseña.';
+      }
+    } catch (e) {
+      msg.className = 'err';
+      msg.textContent = translateAuthError(e.message);
+    } finally { busy(btn, false); }
+  };
+}
+
+function translateAuthError(m = '') {
+  if (/Invalid login credentials/i.test(m)) return 'Correo o contraseña incorrectos.';
+  if (/Email not confirmed/i.test(m)) return 'Debes confirmar tu correo antes de ingresar (revisa tu bandeja y spam).';
+  if (/already registered/i.test(m)) return 'Ese correo ya tiene una cuenta. Intenta ingresar o recuperar la contraseña.';
+  if (/Password should be/i.test(m)) return 'La contraseña debe tener al menos 6 caracteres.';
+  if (/rate limit/i.test(m)) return 'Demasiados intentos o correos enviados. Espera unos minutos.';
+  return m;
+}
+
+function viewNewPassword() {
+  nav.classList.add('hidden');
+  app.innerHTML = `<div class="auth-wrap"><div class="brand"><div class="logo">🔑</div><h1>Nueva contraseña</h1></div>
+    <div class="card"><form id="f">
+      <label>Nueva contraseña</label><input name="p1" type="password" minlength="6" required autocomplete="new-password">
+      <label>Repetir contraseña</label><input name="p2" type="password" minlength="6" required autocomplete="new-password">
+      <p id="msg" class="err"></p>
+      <button class="btn block">Guardar contraseña</button></form></div></div>`;
+  $('#f').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const { p1, p2 } = Object.fromEntries(new FormData(ev.target));
+    if (p1 !== p2) { $('#msg').textContent = 'Las contraseñas no coinciden.'; return; }
+    const btn = ev.target.querySelector('button'); busy(btn, true);
+    const { error } = await sb.auth.updateUser({ password: p1 });
+    busy(btn, false);
+    if (error) { $('#msg').textContent = translateAuthError(error.message); return; }
+    recoveryMode = false;
+    toast('Contraseña actualizada ✅');
+    location.hash = '#/hoy'; route();
+  };
+}
+
+// ---------------------------------------------------------------- PERFIL / ONBOARDING
+async function viewProfile() {
+  const p = profile || {};
+  const first = !profileComplete();
+  const opt = (obj, val) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === val ? 'selected' : ''}>${esc(v.label ?? v)}</option>`).join('');
+  app.innerHTML = `
+  <h1>${first ? '¡Bienvenido/a! 👋' : 'Mi perfil'}</h1>
+  ${first ? `<p class="muted">Completa tus datos para calcular tu plan personalizado.</p>` : ''}
+  <form id="f" class="card">
+    <label>Nombre</label><input name="display_name" required maxlength="40" value="${esc(p.display_name)}">
+    <div class="grid2">
+      <div><label>Sexo</label><select name="sex" required><option value="">—</option>
+        <option value="M" ${p.sex === 'M' ? 'selected' : ''}>Hombre</option><option value="F" ${p.sex === 'F' ? 'selected' : ''}>Mujer</option></select></div>
+      <div><label>Edad</label><input name="age" type="number" inputmode="numeric" min="12" max="100" required value="${p.age ?? ''}"></div>
+      <div><label>Peso actual (kg)</label><input name="weight_kg" type="number" inputmode="decimal" step="0.1" min="30" max="300" required value="${p.weight_kg ?? ''}"></div>
+      <div><label>Estatura (cm)</label><input name="height_cm" type="number" inputmode="numeric" min="100" max="250" required value="${p.height_cm ?? ''}"></div>
+    </div>
+    <label>Nivel de actividad física</label>
+    <select name="activity_level" required>${opt(C.ACTIVITY_LEVELS, p.activity_level || 'ligero')}</select>
+    <label>Objetivo</label>
+    <select name="goal" required>${opt(C.GOALS, p.goal || 'lose')}</select>
+    <div class="grid2" id="rateRow">
+      <div><label>Ritmo (kg/semana)</label>
+        <select name="rate_kg_week">${[0.25, 0.5, 0.75, 1].map((r) => `<option value="${r}" ${Number(p.rate_kg_week ?? 0.5) === r ? 'selected' : ''}>${String(r).replace('.', ',')} kg</option>`).join('')}</select></div>
+      <div><label>Peso meta (opcional)</label><input name="target_weight_kg" type="number" inputmode="decimal" step="0.1" value="${p.target_weight_kg ?? ''}"></div>
+    </div>
+    <label>Meta semanal de actividad física (minutos)</label>
+    <input name="weekly_activity_goal_min" type="number" inputmode="numeric" min="0" max="3000" step="10" value="${p.weekly_activity_goal_min ?? 150}">
+    <div id="calc" class="calc-box"></div>
+    <button class="btn block" style="margin-top:14px">${first ? 'Calcular y comenzar' : 'Guardar cambios'}</button>
+  </form>
+  ${first ? '' : `
+  <div class="card">
+    <h2>Cuenta</h2>
+    <p class="muted small">${esc(session.user.email)}</p>
+    <form id="pw" class="row" style="margin-top:8px">
+      <input name="p" type="password" minlength="6" placeholder="Nueva contraseña" autocomplete="new-password" required>
+      <button class="btn ghost">Cambiar</button>
+    </form>
+    <button id="logout" class="btn danger block" style="margin-top:12px">Cerrar sesión</button>
+  </div>
+  <p class="small muted">Las calorías y macros son estimaciones generales y no reemplazan la evaluación de un/a nutricionista o médico.</p>`}`;
+
+  const form = $('#f');
+  const read = () => {
+    const f = Object.fromEntries(new FormData(form));
+    return { ...f, age: +f.age, weight_kg: +f.weight_kg, height_cm: +f.height_cm, rate_kg_week: f.goal === 'maintain' ? 0 : +f.rate_kg_week };
+  };
+  const update = () => {
+    const f = read();
+    $('#rateRow').style.display = f.goal === 'maintain' ? 'none' : '';
+    if (!f.sex || !f.age || !f.weight_kg || !f.height_cm) { $('#calc').innerHTML = '<span class="muted small">Completa sexo, edad, peso y estatura para ver tu plan.</span>'; return; }
+    const t = C.targets(f);
+    const adj = t.adjust === 0 ? 'Sin ajuste (mantención)' : t.adjust < 0 ? `Déficit de ${fmt(-t.adjust)} kcal/día (≈ ${String(Math.abs(t.weeklyChangeKg)).replace('.', ',')} kg/semana)` : `Superávit de ${fmt(t.adjust)} kcal/día`;
+    $('#calc').innerHTML = `
+      <div class="grid3">
+        <div><div class="v">${fmt(t.bmr)}</div><div class="small muted">TMB (kcal)</div></div>
+        <div><div class="v">${fmt(t.tdee)}</div><div class="small muted">Gasto total (GET)</div></div>
+        <div><div class="v" style="color:var(--accent)">${fmt(t.kcal_target)}</div><div class="small muted">Meta diaria</div></div>
+      </div>
+      <p class="small" style="text-align:center">${adj}</p>
+      <div class="grid3">
+        <div><div class="v" style="color:var(--prot)">${t.protein_g} g</div><div class="small muted">Proteínas</div></div>
+        <div><div class="v" style="color:var(--carb)">${t.carbs_g} g</div><div class="small muted">Carbohidratos</div></div>
+        <div><div class="v" style="color:var(--fat)">${t.fat_g} g</div><div class="small muted">Grasas</div></div>
+      </div>
+      ${t.warning ? `<p class="warn">⚠️ ${esc(t.warning)}</p>` : ''}`;
+  };
+  form.oninput = update; update();
+
+  form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const f = read();
+    const t = C.targets(f);
+    const btn = form.querySelector('button'); busy(btn, true, 'Guardando…');
+    const row = {
+      display_name: f.display_name.trim(), sex: f.sex, age: f.age, weight_kg: f.weight_kg, height_cm: f.height_cm,
+      activity_level: f.activity_level, goal: f.goal, rate_kg_week: f.rate_kg_week,
+      target_weight_kg: f.target_weight_kg ? +f.target_weight_kg : null,
+      weekly_activity_goal_min: +f.weekly_activity_goal_min || 0,
+      start_weight_kg: p.start_weight_kg ?? f.weight_kg,
+      bmr: t.bmr, tdee: t.tdee, kcal_target: t.kcal_target, protein_g: t.protein_g, carbs_g: t.carbs_g, fat_g: t.fat_g,
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await sb.from('profiles').update(row).eq('id', session.user.id);
+    if (!error && Number(p.weight_kg) !== f.weight_kg) {
+      await sb.from('weight_logs').upsert({ user_id: session.user.id, log_date: C.isoDate(), weight_kg: f.weight_kg }, { onConflict: 'user_id,log_date' });
+    }
+    busy(btn, false);
+    if (error) return toast(error.message, true);
+    profile = { ...p, ...row };
+    toast('Plan guardado ✅');
+    location.hash = '#/hoy';
+  };
+
+  if (!first) {
+    $('#logout').onclick = async () => { await sb.auth.signOut(); location.hash = '#/login'; };
+    $('#pw').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const { error } = await sb.auth.updateUser({ password: ev.target.p.value });
+      if (error) return toast(translateAuthError(error.message), true);
+      ev.target.reset(); toast('Contraseña actualizada ✅');
+    };
+  }
+}
+
+// ---------------------------------------------------------------- HOY
+function ring(value, target) {
+  const R = 56, Cc = 2 * Math.PI * R;
+  const frac = target > 0 ? Math.min(1, value / target) : 0;
+  const over = value > target * 1.1;
+  const color = over ? 'var(--danger)' : 'var(--accent)';
+  return `<div class="ring"><svg width="132" height="132" viewBox="0 0 132 132">
+    <circle cx="66" cy="66" r="${R}" fill="none" stroke="var(--line)" stroke-width="12"/>
+    <circle cx="66" cy="66" r="${R}" fill="none" stroke="${color}" stroke-width="12" stroke-linecap="round"
+      stroke-dasharray="${Cc}" stroke-dashoffset="${Cc * (1 - frac)}" style="transition:stroke-dashoffset .5s"/></svg>
+    <div class="center"><div class="big">${fmt(value)}</div><div class="small muted">de ${fmt(target)} kcal</div></div></div>`;
+}
+
+function macroBar(label, value, target, color) {
+  const w = target > 0 ? Math.min(100, (value / target) * 100) : 0;
+  return `<div class="macro"><div class="row between"><span>${label}</span>
+    <span><b>${r0(value)}</b> / ${r0(target)} g <span class="muted small">· faltan ${Math.max(0, r0(target - value))} g</span></span></div>
+    <div class="bar"><i style="width:${w}%;background:${color}"></i></div></div>`;
+}
+
+async function viewToday() {
+  const d = state.date;
+  const uid = session.user.id;
+  const [food, weight, acts] = await Promise.all([
+    sb.from('food_logs').select('*').eq('log_date', d).order('created_at'),
+    sb.from('weight_logs').select('*').eq('log_date', d).maybeSingle(),
+    sb.from('activity_logs').select('*').eq('log_date', d).order('created_at'),
+  ]);
+  if (food.error) throw food.error;
+  const logs = food.data || [];
+  const tot = C.sumLogs(logs);
+  const P = profile;
+  const remaining = P.kcal_target - tot.kcal;
+
+  // URLs firmadas para las fotos
+  const paths = logs.map((l) => l.photo_path).filter(Boolean);
+  const urls = {};
+  if (paths.length) {
+    const { data } = await sb.storage.from('food-photos').createSignedUrls(paths, 3600);
+    (data || []).forEach((x) => { if (x.signedUrl) urls[x.path] = x.signedUrl; });
+  }
+
+  const byMeal = Object.keys(MEALS).map((m) => ({ m, items: logs.filter((l) => l.meal === m) })).filter((g) => g.items.length);
+  const actMin = (acts.data || []).reduce((a, x) => a + x.minutes, 0);
+
+  app.innerHTML = `
+  <div class="date-nav">
+    <button class="icon-btn" id="prev">‹</button>
+    <div class="label">${prettyDate(d)}</div>
+    <button class="icon-btn" id="next" ${d >= C.isoDate() ? 'disabled style="opacity:.3"' : ''}>›</button>
+  </div>
+
+  <div class="card">
+    <div class="ring-wrap">
+      ${ring(tot.kcal, P.kcal_target)}
+      <div class="kpis">
+        <div class="kpi"><span class="muted">Meta</span><b>${fmt(P.kcal_target)}</b></div>
+        <div class="kpi"><span class="muted">Consumido</span><b>${fmt(tot.kcal)}</b></div>
+        <div class="kpi"><span class="muted">${remaining >= 0 ? 'Te quedan' : 'Te pasaste'}</span>
+          <b style="color:${remaining >= 0 ? 'var(--accent)' : 'var(--danger)'}">${fmt(Math.abs(remaining))}</b></div>
+        <div class="kpi"><span class="muted">Actividad</span><b>${actMin} min</b></div>
+      </div>
+    </div>
+    ${macroBar('🥩 Proteínas', tot.protein_g, P.protein_g, COLORS.prot)}
+    ${macroBar('🍞 Carbohidratos', tot.carbs_g, P.carbs_g, COLORS.carb)}
+    ${macroBar('🥑 Grasas', tot.fat_g, P.fat_g, COLORS.fat)}
+  </div>
+
+  <div class="card">
+    <div class="row between"><h2 style="margin:0">Comidas</h2><a class="btn sm" href="#/registrar">📷 Registrar</a></div>
+    ${byMeal.length ? byMeal.map((g) => `
+      <div class="meal-h"><span>${MEALS[g.m]}</span><span>${fmt(C.sumLogs(g.items).kcal)} kcal</span></div>
+      ${g.items.map((l) => `
+        <div class="food">
+          ${l.photo_path && urls[l.photo_path] ? `<img src="${esc(urls[l.photo_path])}" alt="">` : '<div class="ph">🍽️</div>'}
+          <div class="info"><div class="name">${esc(l.description || 'Comida')}</div>
+            <div class="mac">${fmt(l.kcal)} kcal · P ${r0(l.protein_g)} · C ${r0(l.carbs_g)} · G ${r0(l.fat_g)}</div>
+            ${l.comment ? `<div class="mac">“${esc(l.comment)}”</div>` : ''}</div>
+          <button class="icon-btn" data-del="${l.id}" title="Eliminar">🗑️</button>
+        </div>`).join('')}`).join('')
+      : `<p class="muted">Aún no registras comidas ${d === C.isoDate() ? 'hoy' : 'este día'}. Toma una foto de tu plato 📸</p>`}
+  </div>
+
+  <div class="card">
+    <h2>⚖️ Peso y medidas</h2>
+    <form id="wf" class="grid3">
+      <div><label>Peso (kg)</label><input name="weight_kg" type="number" inputmode="decimal" step="0.1" min="30" max="300" value="${weight.data?.weight_kg ?? ''}" required></div>
+      <div><label>Cintura (cm)</label><input name="waist_cm" type="number" inputmode="decimal" step="0.5" value="${weight.data?.waist_cm ?? ''}"></div>
+      <div><label>% grasa</label><input name="body_fat_pct" type="number" inputmode="decimal" step="0.1" value="${weight.data?.body_fat_pct ?? ''}"></div>
+      <button class="btn ghost" style="grid-column:1/-1">${weight.data ? 'Actualizar' : 'Guardar'} peso</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>🏃 Actividad física</h2>
+    ${(acts.data || []).map((a) => `<div class="row between food"><div class="info"><div class="name">${esc(a.activity)}</div>
+      <div class="mac">${a.minutes} min${a.kcal_burned ? ` · ~${a.kcal_burned} kcal` : ''}</div></div>
+      <button class="icon-btn" data-delact="${a.id}">🗑️</button></div>`).join('')}
+    <form id="af" class="grid3" style="margin-top:6px">
+      <div style="grid-column:span 2"><label>Actividad</label><input name="activity" list="acts" required placeholder="Ej: Caminar, pesas, fútbol"></div>
+      <div><label>Minutos</label><input name="minutes" type="number" inputmode="numeric" min="1" max="1440" required></div>
+      <datalist id="acts">${['Caminar', 'Correr', 'Pesas / gimnasio', 'Bicicleta', 'Natación', 'Fútbol', 'Pádel / tenis', 'Yoga / pilates', 'Baile', 'Trekking', 'Crossfit / HIIT'].map((x) => `<option value="${x}">`).join('')}</datalist>
+      <button class="btn ghost" style="grid-column:1/-1">Agregar actividad</button>
+    </form>
+  </div>`;
+
+  $('#prev').onclick = () => { state.date = C.addDays(d, -1); route(); };
+  $('#next').onclick = () => { if (d < C.isoDate()) { state.date = C.addDays(d, 1); route(); } };
+
+  $$('[data-del]').forEach((b) => (b.onclick = async () => {
+    if (!confirm('¿Eliminar este registro?')) return;
+    const l = logs.find((x) => String(x.id) === b.dataset.del);
+    const { error } = await sb.from('food_logs').delete().eq('id', l.id);
+    if (error) return toast(error.message, true);
+    if (l.photo_path) await sb.storage.from('food-photos').remove([l.photo_path]);
+    route();
+  }));
+  $$('[data-delact]').forEach((b) => (b.onclick = async () => {
+    const { error } = await sb.from('activity_logs').delete().eq('id', b.dataset.delact);
+    if (error) return toast(error.message, true);
+    route();
+  }));
+
+  $('#wf').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const f = Object.fromEntries(new FormData(ev.target));
+    const row = { user_id: uid, log_date: d, weight_kg: +f.weight_kg, waist_cm: f.waist_cm ? +f.waist_cm : null, body_fat_pct: f.body_fat_pct ? +f.body_fat_pct : null };
+    const { error } = await sb.from('weight_logs').upsert(row, { onConflict: 'user_id,log_date' });
+    if (error) return toast(error.message, true);
+    // Si es el registro más reciente, actualiza el peso del perfil y recalcula metas
+    const { data: last } = await sb.from('weight_logs').select('log_date').order('log_date', { ascending: false }).limit(1).maybeSingle();
+    if (last?.log_date === d && Number(profile.weight_kg) !== row.weight_kg) {
+      const t = C.targets({ ...profile, weight_kg: row.weight_kg });
+      const upd = { weight_kg: row.weight_kg, bmr: t.bmr, tdee: t.tdee, kcal_target: t.kcal_target, protein_g: t.protein_g, carbs_g: t.carbs_g, fat_g: t.fat_g };
+      await sb.from('profiles').update(upd).eq('id', uid);
+      Object.assign(profile, upd);
+      toast('Peso guardado y metas recalculadas ✅');
+    } else toast('Peso guardado ✅');
+    route();
+  };
+
+  $('#af').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const f = Object.fromEntries(new FormData(ev.target));
+    const { error } = await sb.from('activity_logs').insert({ log_date: d, activity: f.activity.trim(), minutes: +f.minutes });
+    if (error) return toast(error.message, true);
+    toast('Actividad registrada 💪');
+    route();
+  };
+}
+
+// ---------------------------------------------------------------- REGISTRAR COMIDA
+async function resizeImage(file, max = 1024, quality = 0.82) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('No se pudo leer la imagen')); i.src = url; });
+    const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * scale);
+    c.height = Math.round(img.naturalHeight * scale);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', quality));
+    const dataUrl = c.toDataURL('image/jpeg', quality);
+    return { blob, dataUrl, base64: dataUrl.split(',')[1] };
+  } finally { URL.revokeObjectURL(url); }
+}
+
+async function viewRegister() {
+  let photo = null; // { blob, dataUrl, base64 }
+  let items = [];
+  let meta = { description: '', confidence: null, notes: '' };
+
+  app.innerHTML = `
+  <h1>Registrar comida</h1>
+  <div class="card">
+    <div class="grid2">
+      <div><label>Comida</label><select id="meal">${Object.entries(MEALS).map(([k, v]) => `<option value="${k}" ${k === defaultMeal() ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+      <div><label>Fecha</label><input id="date" type="date" value="${state.date}" max="${C.isoDate()}"></div>
+    </div>
+    <label>Foto del alimento</label>
+    <label class="photo-drop" id="drop">
+      <input id="file" type="file" accept="image/*" capture="environment">
+      <div id="ph"><div style="font-size:2.4rem">📷</div><div><b>Toma o elige una foto</b></div><div class="small">del plato, colación o bebida</div></div>
+    </label>
+    <label>Comentario (opcional)</label>
+    <textarea id="comment" maxlength="500" placeholder="Ej: arroz con pollo, la porción de arroz era como 1 taza; le eché 1 cucharada de aceite. Me comí la mitad."></textarea>
+    <button id="analyze" class="btn block" style="margin-top:12px">✨ Analizar con IA</button>
+    <button id="manual" class="btn ghost block" style="margin-top:8px">✍️ Ingresar valores a mano</button>
+  </div>
+  <div id="result"></div>`;
+
+  $('#file').onchange = async (ev) => {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    try {
+      photo = await resizeImage(file);
+      $('#ph').innerHTML = `<img src="${photo.dataUrl}" alt="foto">`;
+    } catch (e) { toast(e.message, true); }
+  };
+
+  const renderResult = () => {
+    const tot = C.sumLogs(items);
+    $('#result').innerHTML = `
+    <div class="card">
+      <div class="row between"><h2 style="margin:0">Resultado</h2>
+        ${meta.confidence ? `<span class="badge ${meta.confidence}">Confianza ${meta.confidence}</span>` : ''}</div>
+      <label>Descripción</label><input id="desc" value="${esc(meta.description)}" placeholder="Nombre del plato">
+      ${meta.notes ? `<p class="small muted">ℹ️ ${esc(meta.notes)}</p>` : ''}
+      <div style="margin-top:8px">
+        ${items.map((it, i) => `<div class="item" data-i="${i}">
+          <div class="row"><input data-k="name" value="${esc(it.name)}" placeholder="Alimento"><button class="icon-btn" data-rm="${i}" title="Quitar">✕</button></div>
+          ${it.quantity ? `<div class="small muted">${esc(it.quantity)}</div>` : ''}
+          <div class="item-nums">
+            ${[['kcal', 'kcal'], ['protein_g', 'Prot g'], ['carbs_g', 'Carb g'], ['fat_g', 'Grasa g']].map(([k, l]) => `<div><span class="small muted">${l}</span>
+              <input data-k="${k}" type="number" inputmode="decimal" step="0.1" min="0" value="${r1(it[k])}"></div>`).join('')}
+          </div></div>`).join('')}
+        <div class="item-total"><b>Total</b><span><b>${fmt(tot.kcal)}</b> kcal · P ${r0(tot.protein_g)} · C ${r0(tot.carbs_g)} · G ${r0(tot.fat_g)}</span></div>
+      </div>
+      <button id="addItem" class="btn ghost sm" style="margin-top:8px">+ Agregar alimento</button>
+      <p class="small muted">Puedes corregir cualquier valor antes de guardar.</p>
+      <button id="save" class="btn block" style="margin-top:6px">Guardar en mi registro</button>
+    </div>`;
+
+    $$('#result .item input').forEach((inp) => (inp.onchange = () => {
+      const i = +inp.closest('.item').dataset.i;
+      items[i][inp.dataset.k] = inp.dataset.k === 'name' ? inp.value : +inp.value || 0;
+      meta.description = $('#desc').value;
+      renderResult();
+    }));
+    $$('[data-rm]').forEach((b) => (b.onclick = () => { meta.description = $('#desc').value; items.splice(+b.dataset.rm, 1); renderResult(); }));
+    $('#addItem').onclick = () => { meta.description = $('#desc').value; items.push({ name: '', kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }); renderResult(); };
+    $('#save').onclick = save;
+    $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  $('#manual').onclick = () => {
+    if (!items.length) items = [{ name: '', kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }];
+    renderResult();
+  };
+
+  $('#analyze').onclick = async () => {
+    const comment = $('#comment').value.trim();
+    if (!photo && !comment) return toast('Toma una foto o escribe qué comiste', true);
+    const btn = $('#analyze'); busy(btn, true, 'Analizando…');
+    try {
+      const { data, error } = await sb.functions.invoke('analyze-food', {
+        body: { image: photo?.base64, mimeType: 'image/jpeg', comment, meal: MEALS[$('#meal').value] },
+      });
+      if (error) {
+        let msg = error.message;
+        try { msg = (await error.context.json()).error || msg; } catch { /* sin cuerpo */ }
+        throw new Error(msg);
+      }
+      if (data.error) throw new Error(data.error);
+      items = (data.items || []).map((it) => ({ ...it }));
+      meta = { description: data.description || '', confidence: data.confidence, notes: data.notes || '' };
+      if (!items.length) { toast(data.notes || 'No se reconoció comida en la imagen', true); items = [{ name: '', kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }]; }
+      renderResult();
+    } catch (e) {
+      toast(e.message, true);
+    } finally { busy(btn, false); }
+  };
+
+  async function save() {
+    const btn = $('#save'); busy(btn, true, 'Guardando…');
+    try {
+      const valid = items.filter((it) => it.name || it.kcal);
+      if (!valid.length) throw new Error('Agrega al menos un alimento');
+      const tot = C.sumLogs(valid);
+      let photo_path = null;
+      if (photo) {
+        photo_path = `${session.user.id}/${Date.now()}.jpg`;
+        const { error } = await sb.storage.from('food-photos').upload(photo_path, photo.blob, { contentType: 'image/jpeg' });
+        if (error) { console.warn('No se pudo subir la foto', error); photo_path = null; }
+      }
+      const date = $('#date').value || state.date;
+      const { error } = await sb.from('food_logs').insert({
+        log_date: date, meal: $('#meal').value,
+        description: ($('#desc').value || valid.map((x) => x.name).join(', ')).slice(0, 200),
+        comment: $('#comment').value.trim() || null, photo_path,
+        kcal: r0(tot.kcal), protein_g: r1(tot.protein_g), carbs_g: r1(tot.carbs_g), fat_g: r1(tot.fat_g),
+        items: valid, ai_confidence: meta.confidence,
+      });
+      if (error) throw error;
+      state.date = date;
+      toast('Comida registrada ✅');
+      location.hash = '#/hoy';
+    } catch (e) { toast(e.message, true); busy(btn, false); }
+  }
+}
+
+// ---------------------------------------------------------------- PROGRESO
+async function viewProgress() {
+  const to = C.isoDate();
+  const from = C.addDays(to, -(state.range - 1));
+  const [food, weights, acts] = await Promise.all([
+    sb.from('food_logs').select('log_date,kcal,protein_g,carbs_g,fat_g').gte('log_date', from).lte('log_date', to),
+    sb.from('weight_logs').select('log_date,weight_kg,waist_cm').order('log_date'),
+    sb.from('activity_logs').select('log_date,minutes').gte('log_date', from).lte('log_date', to),
+  ]);
+  if (food.error) throw food.error;
+  const P = profile;
+
+  // agregación diaria
+  const days = [];
+  for (let d = from; d <= to; d = C.addDays(d, 1)) days.push(d);
+  const daily = Object.fromEntries(days.map((d) => [d, { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, n: 0, act: 0 }]));
+  (food.data || []).forEach((l) => { const x = daily[l.log_date]; if (!x) return; x.kcal += +l.kcal; x.protein_g += +l.protein_g; x.carbs_g += +l.carbs_g; x.fat_g += +l.fat_g; x.n++; });
+  (acts.data || []).forEach((a) => { if (daily[a.log_date]) daily[a.log_date].act += a.minutes; });
+
+  const logged = days.filter((d) => daily[d].n > 0);
+  const kcalOk = logged.filter((d) => Math.abs(daily[d].kcal - P.kcal_target) <= P.kcal_target * 0.1).length;
+  const protOk = logged.filter((d) => daily[d].protein_g >= P.protein_g * 0.9).length;
+  const avg = (k) => (logged.length ? logged.reduce((a, d) => a + daily[d][k], 0) / logged.length : 0);
+  const totalAct = days.reduce((a, d) => a + daily[d].act, 0);
+
+  const ws = weights.data || [];
+  const wNow = ws.length ? +ws[ws.length - 1].weight_kg : +P.weight_kg;
+  const wStart = +P.start_weight_kg || (ws[0] ? +ws[0].weight_kg : wNow);
+  const wDiff = r1(wNow - wStart);
+
+  // semanas
+  const weeks = {};
+  days.forEach((d) => { const w = C.weekStart(d); (weeks[w] ||= []).push(d); });
+  const wRows = Object.entries(weeks).reverse().map(([w, ds]) => {
+    const lg = ds.filter((d) => daily[d].n > 0);
+    const a = (k) => (lg.length ? lg.reduce((s, d) => s + daily[d][k], 0) / lg.length : null);
+    const inWeek = ws.filter((x) => x.log_date >= w && x.log_date <= C.addDays(w, 6));
+    const before = ws.filter((x) => x.log_date < w).pop();
+    const last = inWeek[inWeek.length - 1];
+    const delta = last && before ? r1(last.weight_kg - before.weight_kg) : null;
+    return { w, ds: ds.length, lg: lg.length, kcal: a('kcal'), prot: a('protein_g'), ok: lg.filter((d) => Math.abs(daily[d].kcal - P.kcal_target) <= P.kcal_target * 0.1).length, act: ds.reduce((s, d) => s + daily[d].act, 0), delta, last: last?.weight_kg };
+  });
+
+  const goalTxt = P.goal === 'lose' ? 'bajar' : P.goal === 'gain' ? 'subir' : 'mantener';
+  app.innerHTML = `
+  <h1>Mi progreso</h1>
+  <div class="tabs">${[7, 30, 90].map((r) => `<button data-r="${r}" class="${state.range === r ? 'active' : ''}">${r} días</button>`).join('')}</div>
+
+  <div class="card"><div class="stat-grid">
+    <div class="stat"><div class="v">${logged.length}/${days.length}</div><div class="l">Días con registro (constancia ${pct(logged.length, days.length)}%)</div></div>
+    <div class="stat"><div class="v">${pct(kcalOk, days.length)}%</div><div class="l">Días en meta calórica (±10%)</div></div>
+    <div class="stat"><div class="v">${pct(protOk, days.length)}%</div><div class="l">Días cumpliendo proteína</div></div>
+    <div class="stat"><div class="v">${fmt(avg('kcal'))}</div><div class="l">kcal promedio (meta ${fmt(P.kcal_target)})</div></div>
+    <div class="stat"><div class="v">${totalAct} min</div><div class="l">Actividad (meta ${r0(P.weekly_activity_goal_min * days.length / 7)} min)</div></div>
+    <div class="stat"><div class="v" style="color:${(P.goal === 'lose' && wDiff < 0) || (P.goal === 'gain' && wDiff > 0) ? 'var(--accent)' : 'inherit'}">${wDiff > 0 ? '+' : ''}${String(wDiff).replace('.', ',')} kg</div><div class="l">Desde el inicio (${String(wStart).replace('.', ',')} → ${String(wNow).replace('.', ',')} kg) · objetivo: ${goalTxt}</div></div>
+  </div></div>
+
+  <div class="card"><h2>🔥 Calorías vs meta</h2><div class="chart-box"><canvas id="cKcal"></canvas></div></div>
+  <div class="card"><h2>🥩 Proteínas vs objetivo</h2><div class="chart-box"><canvas id="cProt"></canvas></div></div>
+  <div class="card"><h2>🍞 Carbohidratos vs objetivo</h2><div class="chart-box"><canvas id="cCarb"></canvas></div></div>
+  <div class="card"><h2>🥑 Grasas vs objetivo</h2><div class="chart-box"><canvas id="cFat"></canvas></div></div>
+  <div class="card"><h2>⚖️ Evolución del peso</h2><div class="chart-box"><canvas id="cWeight"></canvas></div>
+    ${ws.length < 2 ? '<p class="small muted">Registra tu peso en la pestaña Hoy (idealmente 1–2 veces por semana, en ayunas) para ver la curva.</p>' : ''}</div>
+
+  <div class="card"><h2>📅 Progreso semanal</h2><div class="table-scroll"><table class="week">
+    <thead><tr><th>Semana</th><th>Días reg.</th><th>kcal prom.</th><th>En meta</th><th>Prot. prom.</th><th>Actividad</th><th>Peso</th></tr></thead>
+    <tbody>${wRows.map((r) => `<tr><td>${shortDate(r.w)}</td><td>${r.lg}/${r.ds}</td><td>${r.kcal == null ? '—' : fmt(r.kcal)}</td><td>${r.ok}</td>
+      <td>${r.prot == null ? '—' : r0(r.prot) + ' g'}</td><td>${r.act} min</td>
+      <td>${r.last ? String(r.last).replace('.', ',') : '—'}${r.delta != null ? ` <span class="small" style="color:${(P.goal === 'lose' ? r.delta < 0 : P.goal === 'gain' ? r.delta > 0 : Math.abs(r.delta) < 0.5) ? 'var(--accent)' : 'var(--muted)'}">(${r.delta > 0 ? '+' : ''}${String(r.delta).replace('.', ',')})</span>` : ''}</td></tr>`).join('')}
+    </tbody></table></div></div>`;
+
+  $$('.tabs button').forEach((b) => (b.onclick = () => { state.range = +b.dataset.r; route(); }));
+
+  const labels = days.map(shortDate);
+  const baseOpts = (unit) => ({
+    responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+    plugins: { legend: { labels: { color: tickColor(), boxWidth: 12 } }, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${r0(c.parsed.y)} ${unit}` } } },
+    scales: { x: { grid: { display: false }, ticks: { color: tickColor(), maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+      y: { beginAtZero: true, grid: { color: gridColor() }, ticks: { color: tickColor() } } },
+  });
+  const barChart = (id, key, target, color, unit, tol) => chart($('#' + id), {
+    type: 'bar',
+    data: { labels, datasets: [
+      { type: 'line', label: 'Meta', data: days.map(() => target), borderColor: COLORS.target, borderDash: [6, 4], pointRadius: 0, borderWidth: 2 },
+      { label: 'Consumido', data: days.map((d) => r0(daily[d][key])), borderRadius: 6,
+        backgroundColor: days.map((d) => {
+          const v = daily[d][key];
+          if (!v) return 'rgba(156,163,175,.3)';
+          if (tol === 'range') return Math.abs(v - target) <= target * 0.1 ? color : v > target ? '#dc2626' : color + '88';
+          return v >= target * 0.9 ? color : color + '88';
+        }) },
+    ] },
+    options: baseOpts(unit),
+  });
+  barChart('cKcal', 'kcal', P.kcal_target, COLORS.kcal, 'kcal', 'range');
+  barChart('cProt', 'protein_g', P.protein_g, COLORS.prot, 'g', 'min');
+  barChart('cCarb', 'carbs_g', P.carbs_g, COLORS.carb, 'g', 'range');
+  barChart('cFat', 'fat_g', P.fat_g, COLORS.fat, 'g', 'range');
+
+  const wl = ws.length ? ws : [{ log_date: to, weight_kg: P.weight_kg }];
+  const wOpts = baseOpts('kg');
+  wOpts.scales.y.beginAtZero = false;
+  wOpts.plugins.tooltip.callbacks.label = (c) => `${c.dataset.label}: ${c.parsed.y} kg`;
+  chart($('#cWeight'), {
+    type: 'line',
+    data: { labels: wl.map((x) => shortDate(x.log_date)), datasets: [
+      { label: 'Peso', data: wl.map((x) => +x.weight_kg), borderColor: COLORS.kcal, backgroundColor: COLORS.kcal + '22', fill: true, tension: 0.3, pointRadius: 3 },
+      ...(P.target_weight_kg ? [{ label: 'Peso meta', data: wl.map(() => +P.target_weight_kg), borderColor: COLORS.target, borderDash: [6, 4], pointRadius: 0 }] : []),
+    ] },
+    options: wOpts,
+  });
+}
+
+// ---------------------------------------------------------------- AMIGOS
+async function viewFriends() {
+  const { data: groups, error } = await sb.from('groups').select('id,name,invite_code,created_by').order('created_at');
+  if (error) throw error;
+  if (groups.length && !groups.some((g) => g.id === state.groupId)) state.groupId = groups[0].id;
+  if (!groups.length) state.groupId = null;
+  const g = groups.find((x) => x.id === state.groupId);
+
+  app.innerHTML = `
+  <h1>Amigos</h1>
+  ${groups.length ? `<div class="card">
+    <div class="row between wrap">
+      <select id="gsel" style="flex:1;min-width:160px">${groups.map((x) => `<option value="${x.id}" ${x.id === state.groupId ? 'selected' : ''}>👥 ${esc(x.name)}</option>`).join('')}</select>
+    </div>
+    <div class="row between" style="margin-top:12px">
+      <div><div class="small muted">Código de invitación</div><div class="code">${esc(g.invite_code)}</div></div>
+      <button id="share" class="btn sm">Invitar amigos</button>
+    </div>
+  </div>
+  <div class="tabs">${[7, 30].map((r) => `<button data-r="${r}" class="${state.groupRange === r ? 'active' : ''}">Últimos ${r} días</button>`).join('')}</div>
+  <div class="card" id="board"><div class="loading">Calculando ranking…</div></div>
+  <div class="card"><h2>📉 Cambio de peso vs su punto de partida</h2>
+    <p class="small muted">En % respecto del peso inicial de cada uno, para comparar de forma justa.</p>
+    <div class="chart-box"><canvas id="cGroup"></canvas></div></div>
+  <details class="card"><summary><b>¿Cómo se calcula el puntaje?</b></summary>
+    <p class="small">Premia la <b>constancia y el cumplimiento de tus propias metas</b>, no solo los kilos:</p>
+    <ul class="small"><li>30% — Constancia: días con comidas registradas.</li>
+      <li>25% — Días con calorías dentro de ±10% de tu meta.</li>
+      <li>20% — Días alcanzando al menos 90% de tu meta de proteína.</li>
+      <li>15% — Minutos de actividad física vs tu meta semanal.</li>
+      <li>10% — Que tu peso vaya en la dirección de <i>tu</i> objetivo.</li></ul>
+    <p class="small muted">Tus amigos solo ven estos indicadores agregados, nunca tus fotos ni el detalle de lo que comes.</p>
+  </details>` : `<div class="card"><p>Aún no estás en ningún grupo. Crea uno e invita a tus amigos con el código, o únete con el código que te compartieron.</p></div>`}
+
+  <div class="card">
+    <h2>Crear grupo</h2>
+    <form id="cg" class="row"><input name="name" required maxlength="60" placeholder="Ej: Los del fútbol"><button class="btn">Crear</button></form>
+    <h2 style="margin-top:16px">Unirme con código</h2>
+    <form id="jg" class="row"><input name="code" required maxlength="10" placeholder="ABC123" style="text-transform:uppercase"><button class="btn ghost">Unirme</button></form>
+  </div>
+  ${g ? `<button id="leave" class="btn danger block">Salir de “${esc(g.name)}”</button>` : ''}`;
+
+  $('#cg').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const { data, error } = await sb.rpc('create_group', { p_name: ev.target.name.value });
+    if (error) return toast(error.message, true);
+    state.groupId = data.id; localStorage.setItem('af_group', data.id);
+    toast('Grupo creado. ¡Comparte el código! 🎉'); route();
+  };
+  $('#jg').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const { data, error } = await sb.rpc('join_group', { p_code: ev.target.code.value });
+    if (error) return toast(error.message, true);
+    state.groupId = data.id; localStorage.setItem('af_group', data.id);
+    toast(`Te uniste a ${data.name} 💪`); route();
+  };
+  if (!g) return;
+
+  $('#gsel').onchange = (ev) => { state.groupId = ev.target.value; localStorage.setItem('af_group', state.groupId); route(); };
+  $$('.tabs button').forEach((b) => (b.onclick = () => { state.groupRange = +b.dataset.r; route(); }));
+  $('#share').onclick = async () => {
+    const text = `¡Únete a mi grupo "${g.name}" en Amigos Fit! 💪\n1) Entra a ${BASE_URL}\n2) Crea tu cuenta\n3) En Amigos → "Unirme con código": ${g.invite_code}`;
+    try {
+      if (navigator.share) await navigator.share({ title: 'Amigos Fit', text });
+      else { await navigator.clipboard.writeText(text); toast('Invitación copiada 📋'); }
+    } catch { /* cancelado */ }
+  };
+  $('#leave').onclick = async () => {
+    if (!confirm(`¿Salir del grupo "${g.name}"?`)) return;
+    const { error } = await sb.from('group_members').delete().eq('group_id', g.id).eq('user_id', session.user.id);
+    if (error) return toast(error.message, true);
+    state.groupId = null; localStorage.removeItem('af_group'); route();
+  };
+
+  const to = C.isoDate();
+  const from = C.addDays(to, -(state.groupRange - 1));
+  const [lb, series] = await Promise.all([
+    sb.rpc('group_leaderboard', { gid: g.id, p_from: from, p_to: to }),
+    sb.rpc('group_weight_series', { gid: g.id, p_from: C.addDays(to, -89), p_to: to }),
+  ]);
+  if (lb.error) { $('#board').innerHTML = `<p class="err">${esc(lb.error.message)}</p>`; return; }
+  const rows = lb.data || [];
+
+  // Reconocimientos (no solo kilos)
+  const best = (fn) => { let top = null; rows.forEach((r) => { const v = fn(r); if (v != null && v > 0 && (!top || v > top.v)) top = { r, v }; }); return top?.r.user_id; };
+  const progressPct = (r) => {
+    if (!r.start_weight || !r.current_weight) return null;
+    const ch = ((r.current_weight - r.start_weight) / r.start_weight) * 100;
+    return r.goal === 'lose' ? -ch : r.goal === 'gain' ? ch : -Math.abs(ch);
+  };
+  const awards = {
+    [best((r) => r.days_logged)]: ['🔥 Más constante'],
+  };
+  const add = (uid, label) => { if (!uid) return; (awards[uid] ||= []).push(label); };
+  add(best((r) => r.protein_ok_days), '🥩 Rey/Reina de la proteína');
+  add(best((r) => r.kcal_ok_days), '🎯 Más precisión calórica');
+  add(best((r) => r.activity_min), '🏃 Más activo/a');
+  add(best((r) => (r.goal === 'maintain' ? null : progressPct(r))), '📈 Mayor avance vs su inicio');
+  delete awards.undefined;
+
+  const medal = (i) => ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
+  const mini = (label, v, max, txt, color = 'var(--accent)') => `<div class="mini"><span class="muted">${label}</span>
+    <div class="bar"><i style="width:${Math.min(100, pct(v, max))}%;background:${color}"></i></div><span>${txt}</span></div>`;
+  const goalTxt = { lose: 'bajar', gain: 'subir', maintain: 'mantener' };
+
+  $('#board').innerHTML = `<h2>🏆 Ranking — ${state.groupRange} días</h2>` + rows.map((r, i) => {
+    const pp = progressPct(r);
+    const ch = r.start_weight && r.current_weight ? r1(r.current_weight - r.start_weight) : null;
+    const actGoal = Math.round((r.activity_goal_min * r.days_in_range) / 7);
+    return `<div class="leader">
+      <div class="pos">${medal(i)}</div>
+      <div class="body">
+        <div class="row between"><div><b>${esc(r.display_name)}</b>${r.user_id === session.user.id ? ' <span class="small muted">(tú)</span>' : ''}
+          <div class="small muted">Objetivo: ${goalTxt[r.goal] || '—'}${ch != null ? ` · ${ch > 0 ? '+' : ''}${String(ch).replace('.', ',')} kg desde el inicio` : ''}</div></div>
+          <div class="score">${r.score}</div></div>
+        ${mini('Constancia', r.days_logged, r.days_in_range, `${r.days_logged}/${r.days_in_range} d`)}
+        ${mini('Calorías ok', r.kcal_ok_days, r.days_in_range, `${r.kcal_ok_days} d`, COLORS.kcal)}
+        ${mini('Proteína ok', r.protein_ok_days, r.days_in_range, `${r.protein_ok_days} d`, COLORS.prot)}
+        ${mini('Actividad', r.activity_min, actGoal, `${r.activity_min} min`, COLORS.carb)}
+        ${pp != null && r.goal !== 'maintain' ? mini('Avance peso', Math.max(0, pp), 10, `${ch > 0 ? '+' : ''}${String(r1(ch / r.start_weight * 100)).replace('.', ',')}%`, COLORS.fat) : ''}
+        ${awards[r.user_id] ? `<div class="chips">${awards[r.user_id].map((a) => `<span class="chip">${a}</span>`).join('')}</div>` : ''}
+      </div></div>`;
+  }).join('') + (rows.length === 1 ? '<p class="small muted">¡Invita a tus amigos para empezar a comparar!</p>' : '');
+
+  // gráfico de % de cambio de peso
+  const ser = series.data || [];
+  const people = [...new Map(ser.map((x) => [x.user_id, x.display_name])).entries()];
+  const allDates = [...new Set(ser.map((x) => x.log_date))].sort();
+  chart($('#cGroup'), {
+    type: 'line',
+    data: {
+      labels: allDates.map(shortDate),
+      datasets: people.map(([uid, name], i) => ({
+        label: name, spanGaps: true, tension: 0.3, pointRadius: 3,
+        borderColor: PALETTE[i % PALETTE.length], backgroundColor: PALETTE[i % PALETTE.length],
+        data: allDates.map((d) => { const p = ser.find((x) => x.user_id === uid && x.log_date === d); return p ? +p.pct_change : null; }),
+      })),
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: tickColor(), boxWidth: 12 } }, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y > 0 ? '+' : ''}${c.parsed.y}%` } } },
+      scales: { x: { grid: { display: false }, ticks: { color: tickColor(), maxTicksLimit: 8 } }, y: { grid: { color: gridColor() }, ticks: { color: tickColor(), callback: (v) => v + '%' } } },
+    },
+  });
+}
+
+init();
