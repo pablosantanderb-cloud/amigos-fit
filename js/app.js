@@ -535,12 +535,14 @@ async function viewToday() {
 
   <div class="card">
     <h2>⚖️ Peso y medidas</h2>
-    <form id="wf" class="grid2">
+    ${weight.data ? `<p>Peso: <b>${dec(weight.data.weight_kg)} kg</b>${weight.data.waist_cm ? ` · Cintura: <b>${dec(weight.data.waist_cm)} cm</b>` : ''}</p>` : '<p class="small muted">Sin registro este día.</p>'}
+    <button type="button" id="wToggle" class="btn ghost block">⚖️ ${weight.data ? 'Editar peso y/o medidas' : 'Registrar peso y/o medidas'}</button>
+    <form id="wf" class="grid2 hidden" style="margin-top:6px">
       <div><label>Peso (kg)</label>${decInput('weight_kg', weight.data?.weight_kg, 'required placeholder="Ej: 78,5"')}</div>
       <div><label>Cintura (cm, opcional)</label>${decInput('waist_cm', weight.data?.waist_cm, 'placeholder="Ej: 92"')}</div>
-      <button class="btn ghost" style="grid-column:1/-1">${weight.data ? 'Actualizar' : 'Guardar'} peso</button>
+      <button class="btn" style="grid-column:1/-1">Guardar</button>
+      <p class="small muted" style="grid-column:1/-1;margin:0">Se guarda en ${prettyDate(d).toLowerCase()}. Usa ‹ › arriba para registrar otros días.</p>
     </form>
-    <p class="small muted">Se guarda en el día que estás viendo (${prettyDate(d).toLowerCase()}). Usa ‹ › arriba para registrar días anteriores.</p>
   </div>
 
   <div class="card">
@@ -595,6 +597,13 @@ async function viewToday() {
     if (error) return toast(error.message, true);
     route();
   }));
+
+  $('#wToggle').onclick = () => {
+    const f = $('#wf');
+    const open = f.classList.toggle('hidden') === false;
+    $('#wToggle').classList.toggle('hidden', open);
+    if (open) f.weight_kg.focus();
+  };
 
   $('#wf').onsubmit = async (ev) => {
     ev.preventDefault();
