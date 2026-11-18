@@ -214,3 +214,10 @@ table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
 @media (prefers-color-scheme: dark) { .coach.warn { background: #3a2a0a; color: #fde68a; } }
 .coach ul { margin: 6px 0 0; padding-left: 18px; }
 .coach li { margin: 4px 0; }
+
+.noexercise { margin-top: 12px; padding: 10px 12px; border-radius: 12px; border: 2px solid #f59e0b; background: rgba(245, 158, 11, .10); }
+.noexercise .flag { font-size: .8rem; font-weight: 700; color: #b45309; margin: 2px 0 8px; }
+@media (prefers-color-scheme: dark) { .noexercise .flag { color: #fbbf24; } }
+.trainrow { padding: 10px 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); margin-top: 8px; }
+.trainrow.int { border-color: rgba(220, 38, 38, .45); }
+.tr-h { display: flex; flex-direction: column; margin-bottom: 6px; }

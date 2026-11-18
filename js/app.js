@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=10';
+import * as C from './calc.js?v=11';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -345,19 +345,23 @@ async function viewProfile() {
       <div><label>Peso actual (kg)</label>${decInput('weight_kg', p.weight_kg, 'required placeholder="Ej: 78,5"')}</div>
       <div><label>Estatura (cm)</label>${decInput('height_cm', p.height_cm, 'required placeholder="Ej: 172"')}</div>
     </div>
-    <label>Actividad de tu día a día <b>sin contar entrenamientos</b></label>
-    <select name="activity_level" required>${opt(C.ACTIVITY_LEVELS, C.ACTIVITY_LEVELS[p.activity_level] && p.activity_basis ? p.activity_level : 'sedentario')}</select>
-    <label>Entrenamientos habituales</label>
-    <div class="train">
-      <div><span class="small muted">Veces/semana</span>
-        <select name="training_sessions_week">${[0, 1, 2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${(p.training_sessions_week ?? 3) === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-      <div><span class="small muted">Duración</span>
-        <select name="training_minutes">${[20, 30, 45, 60, 75, 90, 120].map((m) => `<option value="${m}" ${(p.training_minutes ?? 60) === m ? 'selected' : ''}>${m} min</option>`).join('')}</select></div>
-      <div><span class="small muted">Intensidad</span>
-        <select name="training_intensity">${Object.entries(C.TRAINING_INTENSITY).map(([k, v]) => `<option value="${k}" ${(p.training_intensity ?? 'moderada') === k ? 'selected' : ''}>${v.label.split(' (')[0]}</option>`).join('')}</select></div>
+    <div class="noexercise">
+      <label style="margin-top:0">🚶 Actividad de tu día a día</label>
+      <div class="flag">⚠️ SIN contar entrenamientos: solo trabajo, casa, traslados y pasos normales</div>
+      <select name="activity_level" required>${opt(C.ACTIVITY_LEVELS, C.ACTIVITY_LEVELS[p.activity_level] && p.activity_basis ? p.activity_level : 'sedentario')}</select>
     </div>
-    <p class="small muted" id="intensityHelp"></p>
-    <p class="small muted">Tu meta diaria considera este promedio y es fija. Para el <b>balance</b> de cada día se usa el ejercicio que realmente hiciste: un día sin entrenar muestra menos déficit y uno con entreno, más.</p>
+    <label>🏋️ Entrenamientos habituales</label>
+    ${['mod', 'int'].map((k) => {
+      const tt = C.TRAINING_TYPES[k];
+      const cur = C.trainingPlan(p)[k];
+      return `<div class="trainrow ${k}">
+        <div class="tr-h"><b>${k === 'mod' ? '💪' : '🔥'} ${tt.label}</b><span class="small muted">${tt.ej}</span></div>
+        <div class="grid2">
+          <select name="train_${k}_sessions">${[0, 1, 2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${cur.n === n ? 'selected' : ''}>${n === 0 ? 'Ninguno' : `${n} ${n === 1 ? 'vez' : 'veces'}/sem`}</option>`).join('')}</select>
+          <select name="train_${k}_minutes">${[20, 30, 45, 60, 75, 90, 120].map((m) => `<option value="${m}" ${cur.min === m ? 'selected' : ''}>${m} min</option>`).join('')}</select>
+        </div></div>`;
+    }).join('')}
+    <p class="small muted">Tu meta considera el promedio de estos entrenos. Cada día se ajusta con lo que realmente entrenes.</p>
     <label>Objetivo</label>
     <select name="goal" required>${opt(C.GOALS, p.goal || 'lose')}</select>
     <div class="grid2" id="rateRow">
@@ -391,7 +395,7 @@ async function viewProfile() {
   const read = () => {
     const f = Object.fromEntries(new FormData(form));
     f.birth_date = readBirth(form);
-    return { ...f, training_sessions_week: +f.training_sessions_week, training_minutes: +f.training_minutes, age: C.ageFromBirth(f.birth_date), weight_kg: num(f.weight_kg), height_cm: num(f.height_cm), rate_kg_week: C.usesRate(f.goal) ? +f.rate_kg_week : 0,
+    return { ...f, train_mod_sessions: +f.train_mod_sessions, train_mod_minutes: +f.train_mod_minutes, train_int_sessions: +f.train_int_sessions, train_int_minutes: +f.train_int_minutes, age: C.ageFromBirth(f.birth_date), weight_kg: num(f.weight_kg), height_cm: num(f.height_cm), rate_kg_week: C.usesRate(f.goal) ? +f.rate_kg_week : 0,
       exercise_credit_pct: +f.exercise_credit_pct, calibration_kcal: p.calibration_kcal || 0,
       learned_tdee: p.learned_tdee, learned_days: p.learned_days || 0 };
   };
@@ -400,7 +404,6 @@ async function viewProfile() {
     const f = read();
     $('#rateRow').querySelector('div').style.display = C.usesRate(f.goal) ? '' : 'none';
     $('#ageTxt').textContent = f.age ? `· ${f.age} años` : '';
-    $('#intensityHelp').textContent = 'Intensidad ' + (C.TRAINING_INTENSITY[f.training_intensity]?.label || '').toLowerCase();
     if (!valid(f)) { $('#calc').innerHTML = '<span class="muted small">Completa sexo, fecha de nacimiento, peso (30–300 kg) y estatura (100–250 cm) para ver tu plan.</span>'; return; }
     const t = C.targets(f);
     const adj = t.adjust === 0 ? 'Sin ajuste (mantención)' : t.adjust < 0 ? `Déficit de ${fmt(-t.adjust)} kcal/día (≈ ${String(Math.abs(t.weeklyChangeKg)).replace('.', ',')} kg/semana)` : `Superávit de ${fmt(t.adjust)} kcal/día`;
@@ -432,7 +435,7 @@ async function viewProfile() {
       target_weight_kg: num(f.target_weight_kg) || null,
       weekly_activity_goal_min: parseInt(f.weekly_activity_goal_min, 10) || 0,
       exercise_credit_pct: f.exercise_credit_pct, activity_basis: 'v3',
-      training_sessions_week: f.training_sessions_week, training_minutes: f.training_minutes, training_intensity: f.training_intensity,
+      train_mod_sessions: f.train_mod_sessions, train_mod_minutes: f.train_mod_minutes, train_int_sessions: f.train_int_sessions, train_int_minutes: f.train_int_minutes,
       start_weight_kg: p.start_weight_kg ?? f.weight_kg,
       bmr: t.bmr, tdee: t.tdee, kcal_target: t.kcal_target, protein_g: t.protein_g, carbs_g: t.carbs_g, fat_g: t.fat_g,
       updated_at: new Date().toISOString(),

@@ -23,17 +23,47 @@ export const TRAINING_INTENSITY = {
   intensa:  { met: 9, label: 'Intensa (correr, HIIT, crossfit, fútbol, spinning)' },
 };
 
-/** kcal por minuto de entrenamiento por sobre el reposo (el reposo ya está en el TMB) */
-export function trainingKcalPerMin(p, intensity = p.training_intensity) {
-  const met = TRAINING_INTENSITY[intensity]?.met ?? TRAINING_INTENSITY.moderada.met;
+// Dos tipos de entrenamiento habitual
+export const TRAINING_TYPES = {
+  mod: { met: 6, label: 'Moderados', ej: 'fuerza / pesas, trote suave, bicicleta, baile, yoga' },
+  int: { met: 9, label: 'Intensos', ej: 'fútbol, natación, correr, pádel, HIIT, crossfit, spinning' },
+};
+
+/** kcal por minuto a un MET dado, por sobre el reposo (el reposo ya está en el TMB) */
+export function kcalPerMinAt(p, met) {
   return ((met - 1) * 3.5 * (Number(p.weight_kg) || 70)) / 200;
+}
+
+/** Compatibilidad: kcal/min según la intensidad indicada */
+export function trainingKcalPerMin(p, intensity = 'moderada') {
+  return kcalPerMinAt(p, TRAINING_INTENSITY[intensity]?.met ?? TRAINING_TYPES.mod.met);
+}
+
+/** Entrenos habituales del perfil en dos filas (con compatibilidad con el formato anterior de una fila) */
+export function trainingPlan(p) {
+  if (p.train_mod_sessions != null || p.train_int_sessions != null) {
+    return {
+      mod: { n: Number(p.train_mod_sessions) || 0, min: Number(p.train_mod_minutes) || 0 },
+      int: { n: Number(p.train_int_sessions) || 0, min: Number(p.train_int_minutes) || 0 },
+    };
+  }
+  const old = { n: Number(p.training_sessions_week) || 0, min: Number(p.training_minutes) || 0 };
+  return p.training_intensity === 'intensa' ? { mod: { n: 0, min: 60 }, int: old } : { mod: old, int: { n: 0, min: 90 } };
 }
 
 /** Gasto promedio diario de los entrenamientos habituales (sesiones × minutos repartidos en 7 días) */
 export function avgTrainingKcal(p) {
-  const n = Number(p.training_sessions_week) || 0;
-  const min = Number(p.training_minutes) || 0;
-  return Math.round((n * min * trainingKcalPerMin(p)) / 7);
+  const t = trainingPlan(p);
+  const week = t.mod.n * t.mod.min * kcalPerMinAt(p, TRAINING_TYPES.mod.met) + t.int.n * t.int.min * kcalPerMinAt(p, TRAINING_TYPES.int.met);
+  return Math.round(week / 7);
+}
+
+/** MET aproximado según el nombre de la actividad registrada */
+export function metForActivity(name = '') {
+  const n = name.toLowerCase();
+  if (/f[uú]tbol|nata|corr|running|trote r[aá]pido|crossfit|hiit|spinning|p[aá]del|tenis|box|squash|basket|b[aá]squet|rugby|trek|escal/.test(n)) return TRAINING_TYPES.int.met;
+  if (/camin|yoga|pilates|estir|movilidad/.test(n)) return 4;
+  return TRAINING_TYPES.mod.met;
 }
 
 export const GOALS = {
@@ -122,7 +152,7 @@ const creditPct = (p) => (p.exercise_credit_pct ?? DEFAULT_CREDIT) / 100;
 /** kcal que se consideran de un entrenamiento registrado: % de lo que dice el reloj, o estimado por minutos */
 export function activityKcal(p, a) {
   if (Number(a.kcal_burned) > 0) return Math.round(Number(a.kcal_burned) * creditPct(p));
-  return Math.round((Number(a.minutes) || 0) * trainingKcalPerMin(p));
+  return Math.round((Number(a.minutes) || 0) * kcalPerMinAt(p, metForActivity(a.activity)));
 }
 
 /** Déficit diario objetivo (positivo = déficit; negativo = superávit para ganar masa) */

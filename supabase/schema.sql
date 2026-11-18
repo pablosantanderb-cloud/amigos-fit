@@ -118,6 +118,12 @@ alter table public.profiles add column if not exists learned_tdee int;
 alter table public.profiles add column if not exists learned_days int default 0;
 alter table public.profiles add column if not exists learned_at date;
 
+-- ---------- Entrenos habituales en dos filas: moderados e intensos ----------
+alter table public.profiles add column if not exists train_mod_sessions int;
+alter table public.profiles add column if not exists train_mod_minutes int;
+alter table public.profiles add column if not exists train_int_sessions int;
+alter table public.profiles add column if not exists train_int_minutes int;
+
 -- ---------- GRUPOS ----------
 create table if not exists public.groups (
   id          uuid primary key default gen_random_uuid(),
@@ -237,14 +243,19 @@ d as (
 
 -- kcal por minuto de entreno según intensidad habitual y peso (igual que la app)
 kpm as (
-  select m.id,
-    ((case m.training_intensity when 'ligera' then 4 when 'intensa' then 9 else 6 end) - 1) * 3.5 * coalesce(m.weight_kg, 70) / 200.0 as per_min
+  select m.id, 3.5 * coalesce(m.weight_kg, 70) / 200.0 as f,
+    -- promedio diario de entrenos habituales: moderados (MET 6) + intensos (MET 9)
+    (coalesce(m.train_mod_sessions, 0) * coalesce(m.train_mod_minutes, 0) * 5
+     + coalesce(m.train_int_sessions, 0) * coalesce(m.train_int_minutes, 0) * 8) * 3.5 * coalesce(m.weight_kg, 70) / 200.0 / 7.0 as avg_train
   from m
 ),
 ex as (  -- entreno de cada día: % de las kcal del reloj o estimado por minutos
   select a.user_id, a.log_date,
     sum(case when coalesce(a.kcal_burned, 0) > 0 then a.kcal_burned * coalesce(m.exercise_credit_pct, 75) / 100.0
-             else a.minutes * k.per_min end) kc
+             else a.minutes * k.f * (case
+               when a.activity ~* '(f[uú]tbol|nata|corr|running|crossfit|hiit|spinning|p[aá]del|tenis|box|squash|b[aá]squet|rugby|trek|escal)' then 8
+               when a.activity ~* '(camin|yoga|pilates|estir|movilidad)' then 3
+               else 5 end) end) kc
   from activity_logs a join m on m.id = a.user_id join kpm k on k.id = a.user_id
   where a.log_date between p_from and p_to
   group by 1, 2
@@ -254,8 +265,8 @@ agg as (
     count(d.log_date)::int as days_logged,
     -- meta del día = meta base + (entreno del día − entreno promedio habitual), igual que en la app
     (count(*) filter (where m.kcal_target > 0 and d.kcal between
-        (m.kcal_target + coalesce(ex.kc, 0) - coalesce(m.training_sessions_week, 0) * coalesce(m.training_minutes, 0) * k.per_min / 7.0) * 0.9 and
-        (m.kcal_target + coalesce(ex.kc, 0) - coalesce(m.training_sessions_week, 0) * coalesce(m.training_minutes, 0) * k.per_min / 7.0) * 1.1))::int as kcal_ok,
+        (m.kcal_target + coalesce(ex.kc, 0) - k.avg_train) * 0.9 and
+        (m.kcal_target + coalesce(ex.kc, 0) - k.avg_train) * 1.1))::int as kcal_ok,
     (count(*) filter (where m.protein_g > 0 and d.prot >= m.protein_g * 0.9))::int as prot_ok,
     round(avg(d.kcal))::numeric as avg_kcal
   from m join kpm k on k.id = m.id
