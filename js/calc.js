@@ -224,9 +224,28 @@ export function dayPlan(p, exerciseKcal, watch) {
   const deficit = targetDeficit(p);
   const floor = Math.max(bmr(p), p.sex === 'M' ? 1500 : 1200);
   let kcal = isFixedMode(p) ? (p.kcal_target || 0) : Math.round(planned.kcal - deficit);
+  // Datos "en vivo" del reloj durante el día: la meta puede SUBIR si ya te moviste más de lo planificado
+  const live = liveExpenditure(p, watch);
+  if (live && !isFixedMode(p)) kcal = Math.max(kcal, Math.round(live.kcal - deficit));
   if (deficit > 0) kcal = Math.max(Math.round(floor), kcal);
   const carbs_g = Math.max(0, Math.round((kcal - p.protein_g * 4 - p.fat_g * 9) / 4));
-  return { kcal_target: kcal, protein_g: p.protein_g, carbs_g, fat_g: p.fat_g, planned, spent, deficit, delta: kcal - (p.kcal_target || 0) };
+  return { kcal_target: kcal, protein_g: p.protein_g, carbs_g, fat_g: p.fat_g, planned, spent, deficit, live, delta: kcal - (p.kcal_target || 0) };
+}
+
+/**
+ * Gasto del día proyectado con los datos del reloj recibidos durante el día:
+ *   reposo proyectado a 24 h (reposo hasta ahora ÷ fracción del día transcurrida; temprano se usa el metabolismo basal)
+ *   + activas hasta ahora × % de confianza en el reloj.
+ * Las activas del reloj ya incluyen los entrenos, así que no se suman los entrenos registrados a mano.
+ */
+export function liveExpenditure(p, watch) {
+  if (!watch?.live_at || watch.live_active_kcal == null) return null;
+  const t = new Date(watch.live_at);
+  const frac = (t.getHours() * 60 + t.getMinutes()) / 1440;
+  const rest = Number(watch.live_resting_kcal) || 0;
+  const restFull = frac >= 0.25 && rest > 0 ? Math.max(bmr(p) * 0.85, Math.min(bmr(p) * 1.25, rest / frac)) : bmr(p);
+  const act = Math.round((Number(watch.live_active_kcal) || 0) * creditPct(p));
+  return { kcal: Math.round(restFull + act), restFull: Math.round(restFull), active: Number(watch.live_active_kcal) || 0, activeCredit: act, at: watch.live_at };
 }
 
 /** Meta de ingesta del día (ver dayPlan; no depende del cierre del reloj) */

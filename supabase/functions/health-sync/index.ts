@@ -53,20 +53,33 @@ async function handle(req: Request): Promise<Response> {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : day === "ayer" ? chileDate(-1) : chileDate(0);
   if (date > chileDate(0)) return json({ error: "Fecha futura" }, 400);
 
-  const active = Math.round(num(b.active_kcal)) || 0;
-  const resting = Math.round(num(b.resting_kcal)) || 0;
-  const total = Math.round(num(b.total_kcal)) || active + resting;
-  if (!(total >= 500 && total <= 10000)) return json({ error: `Total fuera de rango (${total} kcal). Revisa que el Atajo envíe energía activa y en reposo.` }, 400);
+  const active = Math.max(0, Math.round(num(b.active_kcal)) || 0);
+  const resting = Math.max(0, Math.round(num(b.resting_kcal)) || 0);
+  if (active + resting > 10000) return json({ error: `Valores fuera de rango (${active + resting} kcal).` }, 400);
+
+  // ¿Cierre del día o dato "en vivo"? Cierre: día pasado, o hoy desde las 23:30 (la automatización de las 23:55).
+  const [hh, mm] = new Intl.DateTimeFormat("en-GB", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit", hour12: false })
+    .format(new Date()).split(":").map(Number);
+  const modo = String(b.modo ?? "").toLowerCase() || (date < chileDate(0) || hh * 60 + mm >= 23 * 60 + 30 ? "cierre" : "en_vivo");
+
+  const row: Record<string, unknown> = { user_id: userId, log_date: date, live_active_kcal: active, live_resting_kcal: resting, live_at: new Date().toISOString() };
+  let msg = `🔄 Amigos Fit: datos de hoy actualizados (activa ${active}, reposo ${resting} kcal)`;
+  if (modo === "cierre") {
+    const total = Math.round(num(b.total_kcal)) || active + resting;
+    if (!(total >= 500 && total <= 10000)) return json({ error: `Total fuera de rango (${total} kcal). Revisa que el Atajo envíe energía activa y en reposo.` }, 400);
+    Object.assign(row, { total_kcal: total, active_kcal: active || null, resting_kcal: resting || null, source: "salud" });
+    msg = `✅ Amigos Fit: cierre del ${date} guardado — total ${total} kcal (activa ${active}, reposo ${resting})`;
+  }
 
   const up = await rest("daily_energy?on_conflict=user_id,log_date", {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify({ user_id: userId, log_date: date, total_kcal: total, active_kcal: active || null, resting_kcal: resting || null, source: "salud" }),
+    body: JSON.stringify(row),
   });
   if (!up.ok) { console.error("upsert", up.status, await up.text()); return json({ error: "No se pudo guardar" }, 500); }
   await rest(`sync_tokens?user_id=eq.${userId}`, { method: "PATCH", body: JSON.stringify({ last_used_at: new Date().toISOString() }) });
 
-  return json({ ok: true, mensaje: `✅ Amigos Fit: ${date} guardado — total ${total} kcal (activa ${active}, reposo ${resting})` });
+  return json({ ok: true, modo, mensaje: msg });
 }
 
 Deno.serve(async (req) => {

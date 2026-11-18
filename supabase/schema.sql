@@ -420,3 +420,10 @@ grant select, insert, update, delete on public.sync_tokens to authenticated;
 grant select, update on public.sync_tokens to service_role;
 grant select, insert, update on public.daily_energy to service_role;
 grant usage, select on all sequences in schema public to service_role;
+alter table public.daily_energy alter column total_kcal drop not null;
+alter table public.daily_energy drop constraint if exists daily_energy_total_kcal_check;
+alter table public.daily_energy add constraint daily_energy_total_kcal_check
+  check (total_kcal is null or total_kcal between 500 and 10000);
+alter table public.daily_energy add column if not exists live_active_kcal int;
+alter table public.daily_energy add column if not exists live_resting_kcal int;
+alter table public.daily_energy add column if not exists live_at timestamptz;

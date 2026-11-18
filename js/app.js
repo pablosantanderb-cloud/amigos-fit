@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=18';
+import * as C from './calc.js?v=19';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -86,7 +86,7 @@ async function renderSyncCard() {
   const { data: row } = await sb.from('sync_tokens').select('token,last_used_at').maybeSingle();
   const copyBtn = (label, value) => `<button type="button" class="btn ghost sm" data-copy="${esc(value)}">📋 ${label}</button>`;
   box.innerHTML = `<h2>⌚ Sincronizar con Apple Salud</h2>
-    <p class="small muted">Con un Atajo de iPhone, cada noche se envía solo el gasto del día (energía activa + en reposo) de tu reloj. Así el cierre del día y el aprendizaje de tu meta funcionan sin que ingreses nada.</p>
+    <p class="small muted">Con un Atajo de iPhone se envía el gasto de tu reloj (energía activa + en reposo): <b>durante el día</b> ajusta tu meta de hoy según lo que te has movido, y <b>a las 23:55</b> queda como cierre del día para tu balance real. El Atajo debe llamarse exactamente <b>“${SHORTCUT_NAME}”</b>.</p>
     ${row ? `
       <div class="sync-row"><span class="small muted">Dirección</span><code>${esc(SYNC_URL)}</code>${copyBtn('Copiar dirección', SYNC_URL)}</div>
       <div class="sync-row"><span class="small muted">Tu código personal (no lo compartas)</span><code>${esc(row.token.slice(0, 6))}••••••••${esc(row.token.slice(-4))}</code>${copyBtn('Copiar código', row.token)}</div>
@@ -103,7 +103,8 @@ async function renderSyncCard() {
             <li><code>active_kcal</code> (Número) = resultado del paso 3</li>
             <li><code>resting_kcal</code> (Número) = resultado del paso 5</li></ul></li>
           <li>Agrega <b>Mostrar resultado</b> (opcional) y toca ▶️ para probarlo. La primera vez acepta el permiso para leer Salud. Debe decir “✅ Amigos Fit: … guardado”.</li>
-          <li>Pestaña <b>Automatización</b> → <b>＋</b> → <b>Hora del día</b>: <b>23:55</b>, <b>Diariamente</b> → marca <b>Ejecutar inmediatamente</b> → elige “Amigos Fit Salud”.</li>
+          <li>Automatización 1 (datos en vivo): pestaña <b>Automatización</b> → <b>＋</b> → <b>App</b> → elige <b>Safari</b> (o la app Amigos Fit si aparece) → <b>Se abre</b> → <b>Ejecutar inmediatamente</b> → elige “Amigos Fit Salud”. Así, cada vez que abras la app, tu meta se ajusta con lo que llevas.</li>
+          <li>Automatización 2 (cierre del día): <b>＋</b> → <b>Hora del día</b>: <b>23:55</b>, <b>Diariamente</b> → <b>Ejecutar inmediatamente</b> → “Amigos Fit Salud”. Lo enviado desde las 23:30 se guarda como cierre del día.</li>
         </ol>
         <p class="muted">Si un día el teléfono estaba apagado a esa hora, ingresa ese cierre a mano en Hoy. Correrlo de nuevo el mismo día solo actualiza el dato.</p>
       </details>
@@ -123,6 +124,17 @@ async function renderSyncCard() {
   if ($('#syncRegen')) $('#syncRegen').onclick = () => {
     if (confirm('¿Generar un código nuevo? El Atajo dejará de funcionar hasta que pegues el nuevo código en él.')) gen();
   };
+}
+
+const SHORTCUT_NAME = 'Amigos Fit Salud';
+// Abre el Atajo y, al terminar, vuelve a Amigos Fit
+const shortcutUrl = () => `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}&x-success=${encodeURIComponent(BASE_URL + '#/hoy')}`;
+function agoTxt(iso) {
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (m < 1) return 'recién';
+  if (m < 60) return `hace ${m} min`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `hace ${h} h ${m % 60} min` : new Date(iso).toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' });
 }
 
 // Llama a la función de IA y devuelve el JSON (o lanza un error legible)
@@ -740,6 +752,7 @@ async function viewToday() {
     sb.from('daily_energy').select('*').eq('log_date', d).maybeSingle(),
   ]);
   const creatine = P_creatine() ? await sb.from('supplement_logs').select('id').eq('log_date', d).eq('item', 'creatina').maybeSingle() : { data: null };
+  const hasSync = !!(await sb.from('sync_tokens').select('user_id').maybeSingle()).data;
   const creatineTaken = !!creatine.data;
   if (food.error) throw food.error;
   const logs = food.data || [];
@@ -782,8 +795,13 @@ async function viewToday() {
     </div>
     <p class="small muted" style="margin:10px 0 0">${C.isFixedMode(P)
       ? `🎯 Meta fija = gasto promedio ${fmt(C.tdee(P))} (incluye tu ejercicio semanal promedio) − ${defTxt} objetivo. Los entrenos no la cambian.`
+      : plan.live && plan.live.kcal - plan.deficit >= plan.planned.kcal - plan.deficit
+      ? `🎯 Meta = gasto según tu reloj ${fmt(plan.live.kcal)} (reposo proyectado ${fmt(plan.live.restFull)} + ${P.exercise_credit_pct ?? C.DEFAULT_CREDIT}% de ${fmt(plan.live.active)} activas) − ${defTxt} objetivo.`
       : `🎯 Meta = gasto estimado ${fmt(plan.planned.kcal)} (base ${fmt(C.dayBase(P))}${actKcal ? ` + entreno ${fmt(actKcal)}` : ''}) − ${defTxt} objetivo.`}
-      ${C.isFixedMode(P) || actKcal ? '' : 'Sin entreno registrado: si entrenas, tu meta sube.'}</p>
+      ${C.isFixedMode(P) || actKcal || plan.live ? '' : 'Sin entreno registrado: si entrenas, tu meta sube.'}</p>
+    ${hasSync && isToday ? `<div class="live row between">
+      <span class="small">${plan.live ? `⌚ Reloj: ${fmt(plan.live.active)} kcal activas · actualizado ${agoTxt(plan.live.at)}` : '⌚ Aún sin datos del reloj hoy'}</span>
+      <a class="btn ghost sm" href="${shortcutUrl()}">🔄 Actualizar</a></div>` : ''}
     ${macroBar('🥩 Proteínas', tot.protein_g, plan.protein_g, COLORS.prot)}
     ${macroBar('🍞 Carbohidratos', tot.carbs_g, plan.carbs_g, COLORS.carb)}
     ${macroBar('🥑 Grasas', tot.fat_g, plan.fat_g, COLORS.fat)}
@@ -920,6 +938,13 @@ async function viewToday() {
   }));
 
   reveal('#wToggle', '#wf', () => $('#wf').weight_kg.focus());
+
+  // --- Datos en vivo: si el Atajo corre al abrir la app, los datos llegan unos segundos después → refresca 1 vez
+  const liveAge = plan.live ? (Date.now() - new Date(plan.live.at).getTime()) / 60000 : Infinity;
+  if (hasSync && isToday && liveAge > 10 && Date.now() - (state.liveRefreshAt || 0) > 120000) {
+    state.liveRefreshAt = Date.now();
+    setTimeout(() => { if (location.hash.replace(/^#\/?/, '').startsWith('hoy') || location.hash === '') route(); }, 9000);
+  }
 
   // --- Creatina: check diario
   const setCreatine = async (taken) => {
