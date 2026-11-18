@@ -296,6 +296,29 @@ function showTutorial(firstTime) {
   render();
 }
 
+// Botón "ojito" para mostrar/ocultar contraseñas
+function addEyes(root = document) {
+  root.querySelectorAll('input[type=password]').forEach((inp) => {
+    if (inp.parentElement.classList.contains('pw')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'pw';
+    inp.parentNode.insertBefore(wrap, inp);
+    wrap.appendChild(inp);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pw-eye';
+    b.setAttribute('aria-label', 'Mostrar contraseña');
+    b.textContent = '👁️';
+    b.onclick = () => {
+      const show = inp.type === 'password';
+      inp.type = show ? 'text' : 'password';
+      b.textContent = show ? '🙈' : '👁️';
+      b.setAttribute('aria-label', show ? 'Ocultar contraseña' : 'Mostrar contraseña');
+    };
+    wrap.appendChild(b);
+  });
+}
+
 // ---------------------------------------------------------------- AUTH
 function viewAuth(mode) {
   const titles = { login: 'Iniciar sesión', registro: 'Crear cuenta', recuperar: 'Recuperar contraseña' };
@@ -322,6 +345,7 @@ function viewAuth(mode) {
     </div>
   </div>`;
 
+  addEyes(app);
   $$('.tabs button').forEach((b) => (b.onclick = () => { location.hash = '#/' + b.dataset.m; }));
   $('#f').onsubmit = async (ev) => {
     ev.preventDefault();
@@ -372,6 +396,7 @@ function viewNewPassword() {
       <label>Repetir contraseña</label><input name="p2" type="password" minlength="6" required autocomplete="new-password">
       <p id="msg" class="err"></p>
       <button class="btn block">Guardar contraseña</button></form></div></div>`;
+  addEyes(app);
   $('#f').onsubmit = async (ev) => {
     ev.preventDefault();
     const { p1, p2 } = Object.fromEntries(new FormData(ev.target));
@@ -453,6 +478,7 @@ async function viewProfile() {
   </div>
   <p class="small muted">Las calorías y macros son estimaciones generales y no reemplazan la evaluación de un/a nutricionista o médico.</p>`}`;
 
+  addEyes(app);
   const form = $('#f');
   const read = () => {
     const f = Object.fromEntries(new FormData(form));
