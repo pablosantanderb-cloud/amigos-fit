@@ -3,7 +3,7 @@ const uid = 'u1';
 const today = new Date(); const iso = (d) => d.toISOString().slice(0,10);
 const day = (n) => { const d = new Date(); d.setDate(d.getDate()+n); return iso(d); };
 const db = {
-  profiles: [{ id: uid, display_name: 'Pablo', sex: 'M', age: 40, birth_date: '1986-03-10', activity_basis: 'sin_ejercicio', exercise_credit_pct: 75, calibration_kcal: 0, height_cm: 178, weight_kg: 88, start_weight_kg: 90, target_weight_kg: 82,
+  profiles: [{ id: uid, display_name: 'Pablo', sex: 'M', age: 40, birth_date: '1986-03-10', activity_basis: 'v3', training_sessions_week: 3, training_minutes: 60, training_intensity: 'moderada', exercise_credit_pct: 75, calibration_kcal: 0, height_cm: 178, weight_kg: 88, start_weight_kg: 90, target_weight_kg: 82,
     activity_level: 'ligero', goal: 'lose', rate_kg_week: 0.5, weekly_activity_goal_min: 150, bmr: 1798, tdee: 2787, kcal_target: 2237, protein_g: 176, carbs_g: 240, fat_g: 62 }],
   food_logs: [], weight_logs: [], activity_logs: [], daily_energy: [], groups: [{ id: 'g1', name: 'Los del fútbol', invite_code: 'ABC123', created_by: uid }], group_members: [],
 };

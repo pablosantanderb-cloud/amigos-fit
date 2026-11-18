@@ -108,6 +108,11 @@ create policy "solo dueño" on public.daily_energy for all using (user_id = auth
 grant select, insert, update, delete on public.daily_energy to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
 
+-- ---------- Entrenamientos habituales (definen el gasto promedio y la meta fija) ----------
+alter table public.profiles add column if not exists training_sessions_week int default 0;
+alter table public.profiles add column if not exists training_minutes int default 60;
+alter table public.profiles add column if not exists training_intensity text default 'moderada';
+
 -- ---------- GRUPOS ----------
 create table if not exists public.groups (
   id          uuid primary key default gen_random_uuid(),
@@ -202,7 +207,7 @@ end $$;
 
 -- ---------- RPC: ranking del grupo ----------
 -- Puntaje 0-100 que premia CONSTANCIA y CUMPLIMIENTO, no solo kilos:
---   30% constancia (días con registro) · 25% calorías dentro de ±10% de la meta del día (base + ejercicio)
+--   30% constancia (días con registro) · 25% calorías dentro de ±10% de la meta diaria (fija)
 --   20% proteína ≥ 90% de la meta · 15% minutos de actividad vs meta semanal
 --   10% tendencia del peso en la dirección de su propio objetivo
 drop function if exists public.group_leaderboard(uuid, date, date);
@@ -224,22 +229,14 @@ d as (
   where f.user_id in (select id from m) and f.log_date between p_from and p_to
   group by 1, 2
 ),
-ex as (  -- kcal de entrenamientos por día: suben la meta de ese día (crédito %)
-  select a.user_id, a.log_date, sum(coalesce(a.kcal_burned, 0)) kc
-  from activity_logs a
-  where a.user_id in (select id from m) and a.log_date between p_from and p_to
-  group by 1, 2
-),
+
 agg as (
   select m.id,
     count(d.log_date)::int as days_logged,
-    (count(*) filter (where m.kcal_target > 0 and d.kcal between
-        (m.kcal_target + coalesce(ex.kc, 0) * coalesce(m.exercise_credit_pct, 75) / 100.0) * 0.9 and
-        (m.kcal_target + coalesce(ex.kc, 0) * coalesce(m.exercise_credit_pct, 75) / 100.0) * 1.1))::int as kcal_ok,
+    (count(*) filter (where m.kcal_target > 0 and d.kcal between m.kcal_target * 0.9 and m.kcal_target * 1.1))::int as kcal_ok,
     (count(*) filter (where m.protein_g > 0 and d.prot >= m.protein_g * 0.9))::int as prot_ok,
     round(avg(d.kcal))::numeric as avg_kcal
   from m left join d on d.user_id = m.id
-  left join ex on ex.user_id = d.user_id and ex.log_date = d.log_date
   group by m.id
 ),
 act as (

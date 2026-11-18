@@ -1,8 +1,12 @@
 // Cálculos nutricionales puros (sin dependencias, testeables con Node).
 
+// Modelo de energía:
+// - META diaria (fija) = gasto PROMEDIO − déficit. El promedio = vida diaria + entrenamientos habituales repartidos en la semana.
+// - BALANCE de cada día = lo que comiste − gasto REAL de ese día:
+//     gasto real = vida diaria (sin entrenos) + ejercicio registrado ese día (o el total del reloj si lo ingresas).
+//   Así un día sin entrenar muestra menos déficit y un día con entreno más, sin mover la meta ni contar nada dos veces.
+
 // Nivel de actividad de la VIDA DIARIA, SIN contar entrenamientos.
-// Los entrenamientos se registran aparte y suman a la meta del día (ver exerciseCredit),
-// así nunca se cuentan dos veces.
 export const ACTIVITY_LEVELS = {
   sedentario: { factor: 1.2,  label: 'Sedentaria: oficina o casa, camino poco (menos de 5.000 pasos)' },
   ligero:     { factor: 1.35, label: 'Ligera: de pie o caminando parte del día (5.000–8.000 pasos)' },
@@ -10,7 +14,27 @@ export const ACTIVITY_LEVELS = {
   activo:     { factor: 1.65, label: 'Muy activa: trabajo físico pesado (más de 12.000 pasos)' },
 };
 
-export const DEFAULT_CREDIT = 75; // % de las kcal de ejercicio del reloj que se suman (los relojes sobreestiman)
+export const DEFAULT_CREDIT = 75; // % de las kcal de ejercicio del reloj que se consideran (los relojes sobreestiman)
+
+// Intensidad típica de los entrenamientos (MET aproximado)
+export const TRAINING_INTENSITY = {
+  ligera:   { met: 4, label: 'Ligera (caminata rápida, yoga, pilates)' },
+  moderada: { met: 6, label: 'Moderada (pesas, trote suave, bicicleta, baile)' },
+  intensa:  { met: 9, label: 'Intensa (correr, HIIT, crossfit, fútbol, spinning)' },
+};
+
+/** kcal por minuto de entrenamiento por sobre el reposo (el reposo ya está en el TMB) */
+export function trainingKcalPerMin(p, intensity = p.training_intensity) {
+  const met = TRAINING_INTENSITY[intensity]?.met ?? TRAINING_INTENSITY.moderada.met;
+  return ((met - 1) * 3.5 * (Number(p.weight_kg) || 70)) / 200;
+}
+
+/** Gasto promedio diario de los entrenamientos habituales (sesiones × minutos repartidos en 7 días) */
+export function avgTrainingKcal(p) {
+  const n = Number(p.training_sessions_week) || 0;
+  const min = Number(p.training_minutes) || 0;
+  return Math.round((n * min * trainingKcalPerMin(p)) / 7);
+}
 
 export const GOALS = {
   lose:      'Bajar de peso',
@@ -55,29 +79,34 @@ export function bmr({ sex, weight_kg, height_cm, age }) {
   return Math.round(sex === 'M' ? base + 5 : base - 161);
 }
 
-/** Gasto base diario SIN entrenamientos (+ ajuste personal de calibración) */
-export function tdee(p) {
+/** Gasto de la vida diaria SIN entrenamientos (+ ajuste personal de calibración) */
+export function baseNoTraining(p) {
   const f = ACTIVITY_LEVELS[p.activity_level]?.factor ?? 1.2;
   return Math.round(bmr(p) * f + (Number(p.calibration_kcal) || 0));
 }
 
-const creditPct = (p) => (p.exercise_credit_pct ?? DEFAULT_CREDIT) / 100;
-
-/** kcal de ejercicio que se suman a la meta del día */
-export function exerciseCredit(p, exerciseKcal) {
-  return Math.round((Number(exerciseKcal) || 0) * creditPct(p));
+/** Gasto PROMEDIO diario = vida diaria + entrenamientos habituales. Es la base de la meta fija. */
+export function tdee(p) {
+  return baseNoTraining(p) + avgTrainingKcal(p);
 }
 
-/** Meta de calorías del día = meta base + crédito por ejercicio */
-export function dayTarget(p, exerciseKcal) {
-  return (p.kcal_target || 0) + exerciseCredit(p, exerciseKcal);
+const creditPct = (p) => (p.exercise_credit_pct ?? DEFAULT_CREDIT) / 100;
+
+/** kcal que se consideran de un entrenamiento registrado: % de lo que dice el reloj, o estimado por minutos */
+export function activityKcal(p, a) {
+  if (Number(a.kcal_burned) > 0) return Math.round(Number(a.kcal_burned) * creditPct(p));
+  return Math.round((Number(a.minutes) || 0) * trainingKcalPerMin(p));
+}
+
+/** Meta de ingesta del día: FIJA (no cambia si entrenas o no) */
+export function dayTarget(p) {
+  return p.kcal_target || 0;
 }
 
 /**
- * Gasto del día.
- * - Con cierre del reloj: reposo + activas × crédito (si solo hay total: TMB + (total − TMB) × crédito).
- * - Sin reloj: gasto base estimado + crédito por ejercicio registrado.
- * Nunca se suman ambos, así no hay doble conteo.
+ * Gasto REAL del día para el balance.
+ * - Con cierre del reloj: reposo + activas × % (si solo hay total: TMB + (total − TMB) × %).
+ * - Sin reloj: vida diaria sin entrenos + entrenamientos registrados ese día (exerciseKcal ya ajustado).
  */
 export function dayExpenditure(p, exerciseKcal, watch) {
   if (watch && Number(watch.total_kcal) > 0) {
@@ -88,7 +117,7 @@ export function dayExpenditure(p, exerciseKcal, watch) {
     const kcal = rest && act ? rest + act * c : bmr(p) + Math.max(0, total - bmr(p)) * c;
     return { kcal: Math.round(Math.min(total, kcal)), source: 'reloj' };
   }
-  return { kcal: tdee(p) + exerciseCredit(p, exerciseKcal), source: 'estimado' };
+  return { kcal: baseNoTraining(p) + Math.round(Number(exerciseKcal) || 0), source: 'estimado' };
 }
 
 /**

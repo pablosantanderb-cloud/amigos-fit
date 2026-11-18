@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=5';
+import * as C from './calc.js?v=6';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -20,6 +20,27 @@ const dec = (v) => (v == null || v === '' ? '' : String(v).replace('.', ','));
 const decInput = (name, value, extra = '') =>
   `<input name="${name}" type="text" inputmode="decimal" autocomplete="off" pattern="[0-9]+([.,][0-9]+)?" value="${esc(dec(value))}" ${extra}>`;
 const GOAL_SHORT = { lose: 'bajar de peso', lose_tone: 'bajar y tonificar', recomp: 'tonificar', maintain: 'mantener', fitness: 'condición física', gain: 'ganar músculo' };
+
+// Fecha de nacimiento con 3 selectores (día / mes / año): cómodo en iPhone y no se sale del recuadro
+const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+function birthPicker(iso) {
+  const [y, m, d] = (iso || '').split('-').map(Number);
+  const maxY = new Date().getFullYear() - 12;
+  const sel = (name, ph, opts, val) => `<select name="${name}" required><option value="">${ph}</option>${opts.map(([v, l]) => `<option value="${v}" ${v === val ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  return `<label>Fecha de nacimiento <span id="ageTxt" class="muted"></span></label>
+    <div class="birth">
+      ${sel('b_d', 'Día', Array.from({ length: 31 }, (_, i) => [i + 1, i + 1]), d)}
+      ${sel('b_m', 'Mes', MONTHS.map((n, i) => [i + 1, n]), m)}
+      ${sel('b_y', 'Año', Array.from({ length: maxY - 1920 + 1 }, (_, i) => [maxY - i, maxY - i]), y)}
+    </div>`;
+}
+function readBirth(form) {
+  const d = +form.b_d.value, m = +form.b_m.value, y = +form.b_y.value;
+  if (!d || !m || !y) return '';
+  const last = new Date(y, m, 0).getDate();
+  const z = (n) => String(n).padStart(2, '0');
+  return `${y}-${z(m)}-${z(Math.min(d, last))}`;
+}
 
 // Llama a la función de IA y devuelve el JSON (o lanza un error legible)
 async function callAI(body) {
@@ -79,10 +100,12 @@ function busy(btn, on, label) {
 
 function prettyDate(iso) {
   const today = C.isoDate();
-  if (iso === today) return 'Hoy';
-  if (iso === C.addDays(today, -1)) return 'Ayer';
   const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'short' });
+  const raw = new Date(y, m - 1, d).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'short' });
+  const txt = raw.charAt(0).toUpperCase() + raw.slice(1);
+  if (iso === today) return `${txt} (hoy)`;
+  if (iso === C.addDays(today, -1)) return `${txt} (ayer)`;
+  return txt;
 }
 const shortDate = (iso) => { const [, m, d] = iso.split('-'); return `${d}/${m}`; };
 
@@ -159,7 +182,7 @@ async function loadProfile() {
   return profile;
 }
 
-const profileComplete = () => profile && profile.kcal_target && profile.weight_kg && profile.birth_date && profile.activity_basis === 'sin_ejercicio';
+const profileComplete = () => profile && profile.kcal_target && profile.weight_kg && profile.birth_date && profile.activity_basis === 'v3';
 
 async function route() {
   clearCharts();
@@ -281,19 +304,29 @@ async function viewProfile() {
   const opt = (obj, val) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === val ? 'selected' : ''}>${esc(v.label ?? v)}</option>`).join('');
   app.innerHTML = `
   <h1>${first ? (p.kcal_target ? 'Actualiza tu perfil' : '¡Bienvenido/a! 👋') : 'Mi perfil'}</h1>
-  ${first ? `<p class="muted">${p.kcal_target ? 'Cambiamos cómo se calcula tu gasto para no contar dos veces el ejercicio. Revisa tu <b>nivel de actividad diaria (sin entrenamientos)</b> y tu fecha de nacimiento, y guarda.' : 'Completa tus datos para calcular tu plan personalizado.'}</p>` : ''}
+  ${first ? `<p class="muted">${p.kcal_target ? 'Mejoramos cómo se calcula tu meta. Indica tu <b>actividad diaria (sin entrenos)</b> y tus <b>entrenamientos habituales</b>, y guarda.' : 'Completa tus datos para calcular tu plan personalizado.'}</p>` : ''}
   <form id="f" class="card">
     <label>Nombre</label><input name="display_name" required maxlength="40" value="${esc(p.display_name)}">
+    <label>Sexo</label><select name="sex" required><option value="">—</option>
+      <option value="M" ${p.sex === 'M' ? 'selected' : ''}>Hombre</option><option value="F" ${p.sex === 'F' ? 'selected' : ''}>Mujer</option></select>
+    ${birthPicker(p.birth_date)}
     <div class="grid2">
-      <div><label>Sexo</label><select name="sex" required><option value="">—</option>
-        <option value="M" ${p.sex === 'M' ? 'selected' : ''}>Hombre</option><option value="F" ${p.sex === 'F' ? 'selected' : ''}>Mujer</option></select></div>
-      <div><label>Fecha de nacimiento <span id="ageTxt"></span></label><input name="birth_date" type="date" required min="1920-01-01" max="${C.addDays(C.isoDate(), -365 * 12)}" value="${p.birth_date ?? ''}"></div>
       <div><label>Peso actual (kg)</label>${decInput('weight_kg', p.weight_kg, 'required placeholder="Ej: 78,5"')}</div>
       <div><label>Estatura (cm)</label>${decInput('height_cm', p.height_cm, 'required placeholder="Ej: 172"')}</div>
     </div>
     <label>Actividad de tu día a día <b>sin contar entrenamientos</b></label>
-    <select name="activity_level" required>${opt(C.ACTIVITY_LEVELS, C.ACTIVITY_LEVELS[p.activity_level] && p.activity_basis === 'sin_ejercicio' ? p.activity_level : 'sedentario')}</select>
-    <p class="small muted">Los entrenamientos los registras aparte (o desde tu reloj) y suman a tu meta de ese día. Así no se cuentan dos veces.</p>
+    <select name="activity_level" required>${opt(C.ACTIVITY_LEVELS, C.ACTIVITY_LEVELS[p.activity_level] && p.activity_basis ? p.activity_level : 'sedentario')}</select>
+    <label>Entrenamientos habituales</label>
+    <div class="train">
+      <div><span class="small muted">Veces/semana</span>
+        <select name="training_sessions_week">${[0, 1, 2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${(p.training_sessions_week ?? 3) === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+      <div><span class="small muted">Duración</span>
+        <select name="training_minutes">${[20, 30, 45, 60, 75, 90, 120].map((m) => `<option value="${m}" ${(p.training_minutes ?? 60) === m ? 'selected' : ''}>${m} min</option>`).join('')}</select></div>
+      <div><span class="small muted">Intensidad</span>
+        <select name="training_intensity">${Object.entries(C.TRAINING_INTENSITY).map(([k, v]) => `<option value="${k}" ${(p.training_intensity ?? 'moderada') === k ? 'selected' : ''}>${v.label.split(' (')[0]}</option>`).join('')}</select></div>
+    </div>
+    <p class="small muted" id="intensityHelp"></p>
+    <p class="small muted">Tu meta diaria considera este promedio y es fija. Para el <b>balance</b> de cada día se usa el ejercicio que realmente hiciste: un día sin entrenar muestra menos déficit y uno con entreno, más.</p>
     <label>Objetivo</label>
     <select name="goal" required>${opt(C.GOALS, p.goal || 'lose')}</select>
     <div class="grid2" id="rateRow">
@@ -304,8 +337,8 @@ async function viewProfile() {
     <div class="grid2">
       <div><label>Meta semanal de ejercicio (min)</label>
         <input name="weekly_activity_goal_min" type="text" inputmode="numeric" pattern="[0-9]+" value="${p.weekly_activity_goal_min ?? 150}"></div>
-      <div><label>kcal del reloj que se suman</label>
-        <select name="exercise_credit_pct">${[[50, '50% (muy prudente)'], [75, '75% (recomendado)'], [100, '100% (confío en mi reloj)']].map(([v, l]) => `<option value="${v}" ${(p.exercise_credit_pct ?? C.DEFAULT_CREDIT) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div><label>kcal del reloj que se consideran</label>
+        <select name="exercise_credit_pct">${[[50, '50%'], [75, '75% (recom.)'], [100, '100%']].map(([v, l]) => `<option value="${v}" ${(p.exercise_credit_pct ?? C.DEFAULT_CREDIT) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     </div>
     ${p.calibration_kcal ? `<p class="small">⚖️ Ajuste por calibración con tu balanza: <b>${p.calibration_kcal > 0 ? '+' : ''}${fmt(p.calibration_kcal)} kcal/día</b> en tu gasto base. <a href="#" id="resetCal">Quitar ajuste</a></p>` : ''}
     <div id="calc" class="calc-box"></div>
@@ -326,7 +359,8 @@ async function viewProfile() {
   const form = $('#f');
   const read = () => {
     const f = Object.fromEntries(new FormData(form));
-    return { ...f, age: C.ageFromBirth(f.birth_date), weight_kg: num(f.weight_kg), height_cm: num(f.height_cm), rate_kg_week: C.usesRate(f.goal) ? +f.rate_kg_week : 0,
+    f.birth_date = readBirth(form);
+    return { ...f, training_sessions_week: +f.training_sessions_week, training_minutes: +f.training_minutes, age: C.ageFromBirth(f.birth_date), weight_kg: num(f.weight_kg), height_cm: num(f.height_cm), rate_kg_week: C.usesRate(f.goal) ? +f.rate_kg_week : 0,
       exercise_credit_pct: +f.exercise_credit_pct, calibration_kcal: p.calibration_kcal || 0 };
   };
   const valid = (f) => f.sex && f.age >= 12 && f.age <= 100 && f.weight_kg >= 30 && f.weight_kg <= 300 && f.height_cm >= 100 && f.height_cm <= 250;
@@ -334,16 +368,17 @@ async function viewProfile() {
     const f = read();
     $('#rateRow').querySelector('div').style.display = C.usesRate(f.goal) ? '' : 'none';
     $('#ageTxt').textContent = f.age ? `· ${f.age} años` : '';
+    $('#intensityHelp').textContent = 'Intensidad ' + (C.TRAINING_INTENSITY[f.training_intensity]?.label || '').toLowerCase();
     if (!valid(f)) { $('#calc').innerHTML = '<span class="muted small">Completa sexo, fecha de nacimiento, peso (30–300 kg) y estatura (100–250 cm) para ver tu plan.</span>'; return; }
     const t = C.targets(f);
     const adj = t.adjust === 0 ? 'Sin ajuste (mantención)' : t.adjust < 0 ? `Déficit de ${fmt(-t.adjust)} kcal/día (≈ ${String(Math.abs(t.weeklyChangeKg)).replace('.', ',')} kg/semana)` : `Superávit de ${fmt(t.adjust)} kcal/día`;
     $('#calc').innerHTML = `
       <div class="grid3">
         <div><div class="v">${fmt(t.bmr)}</div><div class="small muted">TMB (kcal)</div></div>
-        <div><div class="v">${fmt(t.tdee)}</div><div class="small muted">Gasto base (sin entrenos)</div></div>
+        <div><div class="v">${fmt(t.tdee)}</div><div class="small muted">Gasto promedio</div></div>
         <div><div class="v" style="color:var(--accent)">${fmt(t.kcal_target)}</div><div class="small muted">Meta diaria</div></div>
       </div>
-      <p class="small" style="text-align:center">${adj}<br><span class="muted">Los días que entrenes, tu meta sube con el ${f.exercise_credit_pct}% de las kcal del ejercicio.</span></p>
+      <p class="small" style="text-align:center">${adj}<br><span class="muted">Gasto promedio = vida diaria ${fmt(C.baseNoTraining(f))} + entrenos ${fmt(C.avgTrainingKcal(f))} kcal/día (promedio semanal)</span></p>
       <div class="grid3">
         <div><div class="v" style="color:var(--prot)">${t.protein_g} g</div><div class="small muted">Proteínas</div></div>
         <div><div class="v" style="color:var(--carb)">${t.carbs_g} g</div><div class="small muted">Carbohidratos</div></div>
@@ -364,7 +399,8 @@ async function viewProfile() {
       activity_level: f.activity_level, goal: f.goal, rate_kg_week: f.rate_kg_week,
       target_weight_kg: num(f.target_weight_kg) || null,
       weekly_activity_goal_min: parseInt(f.weekly_activity_goal_min, 10) || 0,
-      exercise_credit_pct: f.exercise_credit_pct, activity_basis: 'sin_ejercicio',
+      exercise_credit_pct: f.exercise_credit_pct, activity_basis: 'v3',
+      training_sessions_week: f.training_sessions_week, training_minutes: f.training_minutes, training_intensity: f.training_intensity,
       start_weight_kg: p.start_weight_kg ?? f.weight_kg,
       bmr: t.bmr, tdee: t.tdee, kcal_target: t.kcal_target, protein_g: t.protein_g, carbs_g: t.carbs_g, fat_g: t.fat_g,
       updated_at: new Date().toISOString(),
@@ -444,9 +480,8 @@ async function viewToday() {
 
   const byMeal = Object.keys(MEALS).map((m) => ({ m, items: logs.filter((l) => mealKey(l.meal) === m) })).filter((g) => g.items.length);
   const actMin = (acts.data || []).reduce((a, x) => a + x.minutes, 0);
-  const actKcal = (acts.data || []).reduce((a, x) => a + (x.kcal_burned || 0), 0);
-  const credit = C.exerciseCredit(P, actKcal);
-  const target = C.dayTarget(P, actKcal);
+  const actKcal = (acts.data || []).reduce((a, x) => a + C.activityKcal(P, x), 0); // ya ajustado (% del reloj)
+  const target = C.dayTarget(P);
   const remaining = target - tot.kcal;
   const watch = energy.data;
   const spent = C.dayExpenditure(P, actKcal, watch);
@@ -463,8 +498,7 @@ async function viewToday() {
     <div class="ring-wrap">
       ${ring(tot.kcal, target)}
       <div class="kpis">
-        <div class="kpi"><span class="muted">Meta base</span><b>${fmt(P.kcal_target)}</b></div>
-        ${credit ? `<div class="kpi"><span class="muted">+ Ejercicio (${P.exercise_credit_pct ?? C.DEFAULT_CREDIT}%)</span><b style="color:var(--accent)">+${fmt(credit)}</b></div>` : ''}
+        <div class="kpi"><span class="muted">Meta diaria</span><b>${fmt(target)}</b></div>
         <div class="kpi"><span class="muted">Consumido</span><b>${fmt(tot.kcal)}</b></div>
         <div class="kpi"><span class="muted">${remaining >= 0 ? 'Te quedan' : 'Te pasaste'}</span>
           <b style="color:${remaining >= 0 ? 'var(--accent)' : 'var(--danger)'}">${fmt(Math.abs(remaining))}</b></div>
@@ -473,7 +507,11 @@ async function viewToday() {
     ${tot.kcal > 0 ? `<div class="balance ${balance < 0 ? 'ok' : 'over'}">
       <span>${spent.source === 'reloj' ? '⌚ Balance real (reloj)' : '📐 Balance estimado'}</span>
       <b>${balance < 0 ? `Déficit de ${fmt(-balance)} kcal` : `Superávit de ${fmt(balance)} kcal`}</b>
-      <span class="small muted">Gasto ${fmt(spent.kcal)} − comido ${fmt(tot.kcal)}${spent.source === 'reloj' ? '' : ' · agrega el gasto total de tu reloj al final del día para el balance real'}</span>
+      <span class="small muted">${spent.source === 'reloj'
+        ? `Gasto del reloj ${fmt(spent.kcal)} − comido ${fmt(tot.kcal)}`
+        : `Gasto de hoy ${fmt(spent.kcal)} = vida diaria ${fmt(C.baseNoTraining(P))} + ${actKcal ? `entreno ${fmt(actKcal)}` : 'sin entreno registrado'} · comido ${fmt(tot.kcal)}`}</span>
+      ${spent.source !== 'reloj' && !actKcal && C.avgTrainingKcal(P) > 0 ? '<span class="small muted">Hoy no hay entreno registrado, por eso el déficit es menor que el de tu meta. Si entrenaste, regístralo abajo.</span>' : ''}
+      ${spent.source !== 'reloj' ? '<span class="small muted">Para el balance real, agrega al final del día el gasto total de tu reloj.</span>' : ''}
     </div>` : ''}
     ${macroBar('🥩 Proteínas', tot.protein_g, P.protein_g, COLORS.prot)}
     ${macroBar('🍞 Carbohidratos', tot.carbs_g, P.carbs_g, COLORS.carb)}
@@ -827,9 +865,9 @@ async function viewProgress() {
   const daily = Object.fromEntries(allDays.map((d) => [d, { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, n: 0, act: 0, burn: 0, watch: null }]));
   (energy.data || []).forEach((e) => { if (daily[e.log_date]) daily[e.log_date].watch = e; });
   (food.data || []).forEach((l) => { const x = daily[l.log_date]; if (!x) return; x.kcal += +l.kcal; x.protein_g += +l.protein_g; x.carbs_g += +l.carbs_g; x.fat_g += +l.fat_g; x.n++; });
-  (acts.data || []).forEach((a) => { if (daily[a.log_date]) { daily[a.log_date].act += a.minutes; daily[a.log_date].burn += a.kcal_burned || 0; } });
+  (acts.data || []).forEach((a) => { if (daily[a.log_date]) { daily[a.log_date].act += a.minutes; daily[a.log_date].burn += C.activityKcal(P, a); } });
   const totalBurn = days.reduce((a, d) => a + daily[d].burn, 0);
-  allDays.forEach((d) => { const x = daily[d]; const e = C.dayExpenditure(P, x.burn, x.watch); x.spent = e.kcal; x.src = e.source; x.target = C.dayTarget(P, x.burn); });
+  allDays.forEach((d) => { const x = daily[d]; const e = C.dayExpenditure(P, x.burn, x.watch); x.spent = e.kcal; x.src = e.source; x.target = C.dayTarget(P); });
   const inTarget = (d) => Math.abs(daily[d].kcal - daily[d].target) <= daily[d].target * 0.1;
   const balanceSum = days.filter((d) => daily[d].n > 0).reduce((a, d) => a + (daily[d].kcal - daily[d].spent), 0);
   const watchDays = days.filter((d) => daily[d].n > 0 && daily[d].src === 'reloj').length;
@@ -875,7 +913,7 @@ async function viewProgress() {
     <div class="stat"><div class="v">${pct(protOk, days.length)}%</div><div class="l">Días cumpliendo proteína</div></div>
     <div class="stat"><div class="v">${fmt(avg('kcal'))}</div><div class="l">kcal promedio (meta base ${fmt(P.kcal_target)})</div></div>
     <div class="stat"><div class="v" style="color:${balanceSum < 0 ? 'var(--accent)' : 'var(--danger)'}">${balanceSum < 0 ? '−' : '+'}${fmt(Math.abs(balanceSum))}</div><div class="l">Balance acumulado kcal (≈ ${balanceSum < 0 ? '−' : '+'}${dec(r1(Math.abs(balanceSum) / 7700))} kg) · ${watchDays} de ${logged.length} días con dato del reloj</div></div>
-    <div class="stat"><div class="v">${totalAct} min</div><div class="l">Actividad (meta ${r0(P.weekly_activity_goal_min * days.length / 7)} min)${totalBurn ? ` · ${fmt(totalBurn)} kcal quemadas` : ''}</div></div>
+    <div class="stat"><div class="v">${totalAct} min</div><div class="l">Actividad (meta ${r0(P.weekly_activity_goal_min * days.length / 7)} min)${totalBurn ? ` · ${fmt(totalBurn)} kcal de ejercicio` : ''}</div></div>
     <div class="stat"><div class="v" style="color:${wDiff !== 0 && goodDelta(wDiff) ? 'var(--accent)' : 'inherit'}">${wDiff > 0 ? '+' : ''}${String(wDiff).replace('.', ',')} kg</div><div class="l">Desde el inicio (${String(wStart).replace('.', ',')} → ${String(wNow).replace('.', ',')} kg) · objetivo: ${goalTxt}</div></div>
   </div></div>
 

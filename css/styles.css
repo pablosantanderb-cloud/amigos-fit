@@ -112,7 +112,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .macro .row { font-size: .9rem; margin-bottom: 4px; }
 
 .date-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.date-nav .label { font-weight: 700; text-transform: capitalize; }
+.date-nav .label { font-weight: 700; }
 
 .meal-h { display: flex; justify-content: space-between; color: var(--muted); font-size: .85rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; margin: 14px 0 6px; }
 .food { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
@@ -197,3 +197,10 @@ label.btn { position: relative; }
 .balance.over b { color: var(--danger); }
 .check { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: .9rem; margin: 6px 0; }
 .check input { width: auto; }
+
+.birth { display: grid; grid-template-columns: 1fr 1.6fr 1.2fr; gap: 8px; }
+.grid3 select { padding-left: 8px; padding-right: 4px; font-size: 15px; }
+.grid2 > div, .grid3 > div { min-width: 0; }
+input[type="date"] { min-width: 0; max-width: 100%; -webkit-appearance: none; appearance: none; }
+.train { display: grid; grid-template-columns: 0.9fr 1.1fr 1.4fr; gap: 8px; }
+.train select { padding-left: 10px; padding-right: 4px; }
