@@ -121,7 +121,7 @@ async function flashModels(): Promise<string[]> {
     return list;
   } catch (e) {
     console.error("No se pudo listar modelos", e);
-    return ["gemini-3.8-flash"];
+    return []; // se usan los modelos preferidos
   }
 }
 
@@ -162,16 +162,23 @@ async function handle(req: Request): Promise<Response> {
   }
   if (image) parts.push({ inline_data: { mime_type: mimeType, data: image } });
 
-  // Prueba el modelo configurado y luego los "flash" que Google tenga disponibles (del más nuevo al más antiguo),
-  // así la app sigue funcionando cuando Google retira modelos.
-  const models = [...new Set([...(Deno.env.get("GEMINI_MODEL") ? [GEMINI_MODEL] : []), ...(await flashModels()), "gemini-flash-latest"])].slice(0, 5);
+  // Modelos medidos con una foto real (nov-2026): 3.5-flash-lite y 3.1-flash-lite responden en ~3-4 s con buena
+  // calidad; gemini-3.8-flash tardó >60 s. Primero los rápidos conocidos y, si Google los retira, los "lite"/"flash"
+  // disponibles que liste la API.
+  const preferred = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+  const available = await flashModels();
+  const models = [...new Set([
+    ...(Deno.env.get("GEMINI_MODEL") ? [GEMINI_MODEL] : []),
+    ...preferred.filter((m) => !available.length || available.includes(m)),
+    ...available,
+  ])].slice(0, 4);
   const baseConfig = { temperature: 0.2, responseMimeType: "application/json", responseSchema: isActivity ? ACTIVITY_SCHEMA : SCHEMA };
   const deadline = Date.now() + 55_000; // responder antes de que el servidor corte la conexión
   let resp: Response | null = null;
   let lastErr = { status: 0, message: "" };
   outer: for (const model of models) {
     // Los modelos 3.x "piensan" antes de responder; pedimos razonamiento bajo para que sea rápido.
-    const configs = /^gemini-[3-9]/.test(model) ? [{ ...baseConfig, thinkingConfig: { thinkingLevel: "minimal" } }, baseConfig] : [baseConfig];
+    const configs = /^gemini-[3-9]/.test(model) && !model.includes("lite") ? [{ ...baseConfig, thinkingConfig: { thinkingLevel: "low" } }, baseConfig] : [baseConfig];
     for (const generationConfig of configs) {
       const left = deadline - Date.now();
       if (left < 5_000) { lastErr = { status: 504, message: "la IA tardó demasiado" }; break outer; }
@@ -180,7 +187,7 @@ async function handle(req: Request): Promise<Response> {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
           body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig }),
-          signal: AbortSignal.timeout(Math.min(22_000, left)),
+          signal: AbortSignal.timeout(Math.min(model.includes("lite") ? 15_000 : 25_000, left)),
         });
       } catch (e) {
         lastErr = { status: 504, message: `sin respuesta de ${model} (${(e as Error).name})` };
