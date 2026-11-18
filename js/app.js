@@ -212,6 +212,12 @@ const MEALS = { desayuno: 'Desayuno', almuerzo: 'Almuerzo', once: 'Once', cena: 
 // Registros antiguos ("colación" / "otros") se muestran como Snack
 const mealKey = (m) => (m === 'colacion' || m === 'otro' ? 'snack' : m);
 const COLORS = { kcal: '#199407', prot: '#2563eb', carb: '#d97706', fat: '#db2777', target: '#6b7280' };
+// Color fijo de cada amigo, como el logo: Luchin verde, Pabluma amarillo, El kacho rojo
+const PERSON_COLORS = { luchin: '#16a34a', pabluma: '#eab308', 'el kacho': '#ef4444' };
+function personColor(name = '', i = 0) {
+  return PERSON_COLORS[String(name).trim().toLowerCase()] || PALETTE[(i + 3) % PALETTE.length];
+}
+const personDot = (name, i) => `<span class="pdot" style="background:${personColor(name, i)}"></span>`;
 const PALETTE = ['#199407', '#2563eb', '#db2777', '#d97706', '#7c3aed', '#0891b2', '#dc2626', '#65a30d', '#c026d3', '#0f766e'];
 
 function toast(msg, isError = false) {
@@ -1431,7 +1437,7 @@ function renderDailyCompare(rows, error, from, to, members) {
     <div class="seg mc-seg">${Object.entries(MAC).map(([k, v]) => `<button type="button" data-dck="${k}" class="${k === mk ? 'active' : ''}">${v[0]}</button>`).join('')}</div>
     <div class="cal">
       <div class="cal-row cal-head"><span></span>${days.map((d) => `<span>${dow(d)}<small>${Number(d.slice(8))}</small></span>`).join('')}</div>
-      ${Object.entries(byUser).map(([uid, u]) => `<div class="cal-row"><span class="cal-name">${esc(u.name)}${uid === session.user.id ? ' <small>(tú)</small>' : ''}</span>
+      ${Object.entries(byUser).map(([uid, u]) => `<div class="cal-row"><span class="cal-name">${personDot(u.name)}${esc(u.name)}${uid === session.user.id ? ' <small>(tú)</small>' : ''}</span>
         ${days.map((d) => {
           const r = u.d[d];
           if (!r) return `<span class="cal-c cal-e${d === today ? ' cal-today' : ''}">—</span>`;
@@ -1452,7 +1458,7 @@ function renderDailyCompare(rows, error, from, to, members) {
       <p class="muted">La meta de calorías de cada día considera el modo de cada uno: en modo dinámico sube los días con entreno; en modo fijo es igual todos los días.</p>
     </details>
     <h3 style="margin-top:14px">📈 ${MAC[mk][0]} diaria – esta semana</h3>
-    <div class="chips" id="dcPeople"><button type="button" class="chip-btn ${!state.dcOnly ? 'on' : ''}" data-dcp="">Todos</button>${Object.entries(byUser).map(([uid, u]) => `<button type="button" class="chip-btn ${state.dcOnly === uid ? 'on' : ''}" data-dcp="${uid}">${esc(u.name)}</button>`).join('')}</div>
+    <div class="chips" id="dcPeople"><button type="button" class="chip-btn ${!state.dcOnly ? 'on' : ''}" data-dcp="">Todos</button>${Object.entries(byUser).map(([uid, u]) => `<button type="button" class="chip-btn ${state.dcOnly === uid ? 'on' : ''}" data-dcp="${uid}">${personDot(u.name)}${esc(u.name)}</button>`).join('')}</div>
     <div class="chart-box"><canvas id="dcChart"></canvas></div>
     <p class="small muted">% de la meta de cada uno. La línea punteada es el 100% (objetivo).</p>`;
   $$('#dailyCmp [data-dck]').forEach((b) => (b.onclick = () => { state.mcMacro = b.dataset.dck; renderDailyCompare(rows, null, from, to, members); }));
@@ -1462,7 +1468,7 @@ function renderDailyCompare(rows, error, from, to, members) {
   if (renderDailyCompare.chart) { renderDailyCompare.chart.destroy(); charts = charts.filter((c) => c !== renderDailyCompare.chart); }
   const people = Object.entries(byUser).filter(([uid]) => !state.dcOnly || state.dcOnly === uid);
   const datasets = people.map(([uid, u]) => {
-    const color = PALETTE[Object.keys(byUser).indexOf(uid) % PALETTE.length];
+    const color = personColor(u.name, Object.keys(byUser).indexOf(uid));
     return {
       label: u.name, borderColor: color, backgroundColor: color, tension: 0.3, spanGaps: true, pointRadius: 4, borderWidth: 2.5,
       data: days.map((d) => { const r = u.d[d]; const t = r && Number(r[tkey]); return r && t ? Math.round((Number(r[key]) / t) * 100) : null; }),
@@ -1514,7 +1520,7 @@ function renderMacroCompare(rows, error) {
   const bar = (label, c) => `<div class="mc-row"><span class="mc-l">${label}</span>
     <div class="mc-bar"><i class="${c.st}" style="width:${Math.min(100, c.pv / 1.5)}%"></i><em></em></div>
     <span class="mc-v ${c.st}">${c.pv}%</span><span class="mc-t">${c.txt}</span></div>`;
-  const who = (r) => `${esc(r.display_name)}${r.user_id === session.user.id ? ' (tú)' : ''}`;
+  const who = (r) => `${personDot(r.display_name)}${esc(r.display_name)}${r.user_id === session.user.id ? ' (tú)' : ''}`;
   const view = state.mcView || 'macro';
   const mk = state.mcMacro || 'kcal';
 
@@ -1662,7 +1668,7 @@ async function viewFriends() {
     return `<div class="leader">
       <div class="pos">${medal(i)}</div>
       <div class="body">
-        <div class="row between"><div><b>${esc(r.display_name)}</b>${r.user_id === session.user.id ? ' <span class="small muted">(tú)</span>' : ''}
+        <div class="row between"><div><b>${personDot(r.display_name)}${esc(r.display_name)}</b>${r.user_id === session.user.id ? ' <span class="small muted">(tú)</span>' : ''}
           <div class="small muted">Objetivo: ${GOAL_SHORT[r.goal] || '—'}${ch != null ? ` · ${ch > 0 ? '+' : ''}${String(ch).replace('.', ',')} kg desde el inicio` : ''}</div></div>
           <div class="score">${r.score}</div></div>
         ${mini('Constancia', r.days_logged, r.days_in_range, `${r.days_logged}/${r.days_in_range} d`)}
@@ -1684,7 +1690,7 @@ async function viewFriends() {
       labels: allDates.map(shortDate),
       datasets: people.map(([uid, name], i) => ({
         label: name, spanGaps: true, tension: 0.3, pointRadius: 3,
-        borderColor: PALETTE[i % PALETTE.length], backgroundColor: PALETTE[i % PALETTE.length],
+        borderColor: personColor(name, i), backgroundColor: personColor(name, i),
         data: allDates.map((d) => { const p = ser.find((x) => x.user_id === uid && x.log_date === d); return p ? +p.pct_change : null; }),
       })),
     },

@@ -61,9 +61,9 @@ export function createClient() {
       if (fn === 'group_weight_series') return { data: [0,7,14,21].flatMap((n,i)=>[
         { user_id: uid, display_name: 'Pablo', log_date: day(-21+n), pct_change: -0.6*i },
         { user_id: 'u2', display_name: 'Camila', log_date: day(-21+n), pct_change: 0.5*i }]), error: null };
-      if (fn === 'group_daily_macros') { const out=[]; const ppl=[[uid,'Pablo',2133,151,250,59],['u2','Luchin',1846,138,209,51],['u3','El kacho',2044,120,290,45]]; for (let i=6;i>=0;i--) ppl.forEach(([u,n,k,p,c,f],j)=>{ if ((i+j)%4===3) return; const r=0.7+((i*7+j*13)%9)/12; out.push({user_id:u,display_name:n,log_date:day(-i),kcal:Math.round(k*r),protein:Math.round(p*(r-0.05)),carbs:Math.round(c*(r+0.1)),fat:Math.round(f*(r+0.15)),kcal_target:k,protein_target:p,carbs_target:c,fat_target:f}); }); return { data: out, error: null }; }
+      if (fn === 'group_daily_macros') { const out=[]; const ppl=[[uid,'Pabluma',2133,151,250,59],['u2','Luchin',1846,138,209,51],['u3','El kacho',2044,120,290,45]]; for (let i=6;i>=0;i--) ppl.forEach(([u,n,k,p,c,f],j)=>{ if ((i+j)%4===3) return; const r=0.7+((i*7+j*13)%9)/12; out.push({user_id:u,display_name:n,log_date:day(-i),kcal:Math.round(k*r),protein:Math.round(p*(r-0.05)),carbs:Math.round(c*(r+0.1)),fat:Math.round(f*(r+0.15)),kcal_target:k,protein_target:p,carbs_target:c,fat_target:f}); }); return { data: out, error: null }; }
       if (fn === 'group_macros') return { data: [
-        { user_id: uid, display_name: 'Pablo', days_logged: 6, avg_kcal: 2050, avg_protein: 120, avg_carbs: 260, avg_fat: 72, kcal_target: 2133, protein_target: 151, carbs_target: 250, fat_target: 59 },
+        { user_id: uid, display_name: 'Pabluma', days_logged: 6, avg_kcal: 2050, avg_protein: 120, avg_carbs: 260, avg_fat: 72, kcal_target: 2133, protein_target: 151, carbs_target: 250, fat_target: 59 },
         { user_id: 'u2', display_name: 'Luchin', days_logged: 7, avg_kcal: 1800, avg_protein: 140, avg_carbs: 190, avg_fat: 50, kcal_target: 1846, protein_target: 138, carbs_target: 209, fat_target: 51 },
         { user_id: 'u3', display_name: 'El kacho', days_logged: 3, avg_kcal: 2500, avg_protein: 85, avg_carbs: 330, avg_fat: 75, kcal_target: 2044, protein_target: 120, carbs_target: 290, fat_target: 45 },
       ], error: null };
