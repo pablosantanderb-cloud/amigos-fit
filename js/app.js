@@ -799,7 +799,7 @@ async function viewToday() {
   ${P_creatine() ? `<div class="card creat ${creatineTaken ? 'done' : ''}">
     <button type="button" id="creatBtn" class="creat-btn" aria-pressed="${creatineTaken}">
       <span class="creat-box">${creatineTaken ? '✓' : ''}</span>
-      <span><b>💊 Creatina</b><small>${creatineTaken ? 'Tomada ✅' : 'Toca para marcarla como tomada'}</small></span>
+      <span><b>💊 Creatina ${isToday ? 'hoy' : 'este día'}</b><small>${creatineTaken ? 'Tomada ✅' : 'Toca para marcarla como tomada'}</small></span>
     </button></div>` : ''}
 
   <div class="card">
