@@ -78,6 +78,53 @@ function showModal({ icon = '', title, text = '', ok = 'Aceptar', cancel = null,
   const no = el.querySelector('[data-m=no]'); if (no) no.onclick = close;
 }
 
+// ---- Sincronización con Apple Salud vía Atajos (código personal privado)
+const SYNC_URL = `${SUPABASE_URL}/functions/v1/health-sync`;
+async function renderSyncCard() {
+  const box = $('#syncCard');
+  if (!box) return;
+  const { data: row } = await sb.from('sync_tokens').select('token,last_used_at').maybeSingle();
+  const copyBtn = (label, value) => `<button type="button" class="btn ghost sm" data-copy="${esc(value)}">📋 ${label}</button>`;
+  box.innerHTML = `<h2>⌚ Sincronizar con Apple Salud</h2>
+    <p class="small muted">Con un Atajo de iPhone, cada noche se envía solo el gasto del día (energía activa + en reposo) de tu reloj. Así el cierre del día y el aprendizaje de tu meta funcionan sin que ingreses nada.</p>
+    ${row ? `
+      <div class="sync-row"><span class="small muted">Dirección</span><code>${esc(SYNC_URL)}</code>${copyBtn('Copiar dirección', SYNC_URL)}</div>
+      <div class="sync-row"><span class="small muted">Tu código personal (no lo compartas)</span><code>${esc(row.token.slice(0, 6))}••••••••${esc(row.token.slice(-4))}</code>${copyBtn('Copiar código', row.token)}</div>
+      <p class="small">${row.last_used_at ? `✅ Última sincronización: ${new Date(row.last_used_at).toLocaleString('es-CL', { dateStyle: 'medium', timeStyle: 'short' })}` : '⏳ Aún no se ha recibido ninguna sincronización.'}</p>
+      <details class="small"><summary><b>Cómo crear el Atajo (5 min, una sola vez)</b></summary>
+        <ol class="steps">
+          <li>Abre la app <b>Atajos</b> → pestaña <b>Atajos</b> → <b>＋</b>. Nómbralo “Amigos Fit Salud”.</li>
+          <li>Agrega <b>Buscar muestras de salud</b>: tipo <b>Energía activa</b>, filtro <b>Fecha de inicio · es hoy</b>.</li>
+          <li>Agrega <b>Calcular estadísticas</b> → <b>Suma</b> de las muestras de salud.</li>
+          <li>Agrega otra <b>Buscar muestras de salud</b>: tipo <b>Energía en reposo</b>, <b>Fecha de inicio · es hoy</b>.</li>
+          <li>Agrega otra <b>Calcular estadísticas</b> → <b>Suma</b>.</li>
+          <li>Agrega <b>Obtener contenido de URL</b>: pega la <b>dirección</b>, toca ▸ y elige <b>Método: POST</b>, <b>Cuerpo de la solicitud: JSON</b>, y agrega 3 campos:
+            <ul><li><code>token</code> (Texto) = tu código (cópialo arriba)</li>
+            <li><code>active_kcal</code> (Número) = resultado del paso 3</li>
+            <li><code>resting_kcal</code> (Número) = resultado del paso 5</li></ul></li>
+          <li>Agrega <b>Mostrar resultado</b> (opcional) y toca ▶️ para probarlo. La primera vez acepta el permiso para leer Salud. Debe decir “✅ Amigos Fit: … guardado”.</li>
+          <li>Pestaña <b>Automatización</b> → <b>＋</b> → <b>Hora del día</b>: <b>23:55</b>, <b>Diariamente</b> → marca <b>Ejecutar inmediatamente</b> → elige “Amigos Fit Salud”.</li>
+        </ol>
+        <p class="muted">Si un día el teléfono estaba apagado a esa hora, ingresa ese cierre a mano en Hoy. Correrlo de nuevo el mismo día solo actualiza el dato.</p>
+      </details>
+      <button type="button" class="btn ghost sm" id="syncRegen" style="margin-top:10px">🔄 Generar un código nuevo</button>`
+    : `<button type="button" class="btn block" id="syncGen">🔑 Generar mi código personal</button>`}`;
+  $$('#syncCard [data-copy]').forEach((b) => (b.onclick = async () => {
+    try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copiado 📋'); } catch { toast('No se pudo copiar', true); }
+  }));
+  const gen = async () => {
+    const bytes = crypto.getRandomValues(new Uint8Array(18));
+    const token = 'af_' + [...bytes].map((x) => x.toString(16).padStart(2, '0')).join('');
+    const { error } = await sb.from('sync_tokens').upsert({ user_id: session.user.id, token, last_used_at: null }, { onConflict: 'user_id' });
+    if (error) return toast(error.message, true);
+    toast('Código generado 🔑'); renderSyncCard();
+  };
+  if ($('#syncGen')) $('#syncGen').onclick = gen;
+  if ($('#syncRegen')) $('#syncRegen').onclick = () => {
+    if (confirm('¿Generar un código nuevo? El Atajo dejará de funcionar hasta que pegues el nuevo código en él.')) gen();
+  };
+}
+
 // Llama a la función de IA y devuelve el JSON (o lanza un error legible)
 async function callAI(body) {
   const t0 = Date.now();
@@ -545,6 +592,7 @@ async function viewProfile() {
     <button id="tutorialBtn" class="btn ghost block" style="margin-top:12px">🎓 Ver tutorial de la app</button>
     <button id="logout" class="btn danger block" style="margin-top:12px">Cerrar sesión</button>
   </div>
+  <div class="card" id="syncCard"><h2>⌚ Sincronizar con Apple Salud</h2><div class="loading">Cargando…</div></div>
   <p class="small muted">Las calorías y macros son estimaciones generales y no reemplazan la evaluación de un/a nutricionista o médico.</p>`}`;
 
   addEyes(app);
@@ -633,6 +681,7 @@ async function viewProfile() {
 
   if (!first) {
     $('#tutorialBtn').onclick = () => showTutorial(false);
+    renderSyncCard();
     $('#logout').onclick = async () => { await sb.auth.signOut(); location.hash = '#/login'; };
     $('#pw').onsubmit = async (ev) => {
       ev.preventDefault();

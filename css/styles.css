@@ -314,3 +314,10 @@ table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
 .creat-box { width: 30px; height: 30px; flex: none; border-radius: 9px; border: 2px solid var(--line); display: inline-flex; align-items: center; justify-content: center; font-weight: 800; color: #fff; font-size: 1.1rem; }
 .creat.done { border-color: var(--accent); background: var(--accent-soft); }
 .creat.done .creat-box { background: var(--accent); border-color: var(--accent); }
+
+.sync-row { display: grid; gap: 4px; margin: 10px 0; }
+.sync-row code { font-size: .78rem; word-break: break-all; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.sync-row .btn { justify-self: start; }
+.steps { padding-left: 20px; margin: 8px 0; }
+.steps li { margin: 6px 0; }
+.steps code { font-size: .8rem; }

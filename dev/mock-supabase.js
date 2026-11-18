@@ -5,7 +5,7 @@ const day = (n) => { const d = new Date(); d.setDate(d.getDate()+n); return iso(
 const db = {
   profiles: [{ id: uid, display_name: 'Pablo', sex: 'M', age: 40, birth_date: '1986-03-10', track_creatine: true, tutorial_done: true, activity_basis: 'v3', train_mod_sessions: 3, train_mod_minutes: 60, train_int_sessions: 2, train_int_minutes: 90, exercise_credit_pct: 75, calibration_kcal: 0, height_cm: 178, weight_kg: 88, start_weight_kg: 90, target_weight_kg: 82,
     activity_level: 'ligero', goal: 'lose', rate_kg_week: 0.5, weekly_activity_goal_min: 150, bmr: 1798, tdee: 2787, kcal_target: 2237, protein_g: 176, carbs_g: 240, fat_g: 62 }],
-  food_logs: [], weight_logs: [], activity_logs: [], daily_energy: [], supplement_logs: [], groups: [{ id: 'g1', name: 'Los del fútbol', invite_code: 'ABC123', created_by: uid }], group_members: [],
+  food_logs: [], weight_logs: [], activity_logs: [], daily_energy: [], supplement_logs: [], sync_tokens: [], groups: [{ id: 'g1', name: 'Los del fútbol', invite_code: 'ABC123', created_by: uid }], group_members: [],
 };
 let id = 1;
 for (let i = 0; i < 20; i++) {
