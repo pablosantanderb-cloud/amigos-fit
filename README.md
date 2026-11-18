@@ -75,3 +75,8 @@ Así funcionan los links de confirmación de cuenta y de **recuperar contraseña
 Supabase → **Authentication → Emails → Templates**:
 - *Confirm signup* → Subject `Confirma tu cuenta de Amigos Fit` → pegar `supabase/email-templates/confirmar-cuenta.html`
 - *Reset password* → Subject `Restablece tu contraseña de Amigos Fit` → pegar `supabase/email-templates/recuperar-contrasena.html`
+
+## Migraciones
+Si el proyecto se creó con una versión anterior de `schema.sql`, correr en orden los archivos de `supabase/migrations/`
+en el SQL Editor (son idempotentes). Después de cambiar `supabase/functions/analyze-food/index.ts`, volver a pegarlo
+en Edge Functions → analyze-food → Code → Deploy.

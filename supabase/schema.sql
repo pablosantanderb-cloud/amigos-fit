@@ -9,12 +9,13 @@ create table if not exists public.profiles (
   display_name          text not null default '',
   sex                   text check (sex in ('M','F')),
   age                   int  check (age between 12 and 100),
+  birth_date            date,
   height_cm             numeric check (height_cm between 100 and 250),
   weight_kg             numeric check (weight_kg between 30 and 300),
   start_weight_kg       numeric,
   target_weight_kg      numeric,
   activity_level        text check (activity_level in ('sedentario','ligero','moderado','activo','muy_activo')),
-  goal                  text check (goal in ('lose','maintain','gain')),
+  goal                  text check (goal in ('lose','lose_tone','recomp','maintain','fitness','gain')),
   rate_kg_week          numeric default 0.5 check (rate_kg_week between 0 and 1.5),
   weekly_activity_goal_min int default 150,
   bmr                   int,
@@ -46,7 +47,7 @@ create table if not exists public.food_logs (
   id          bigint generated always as identity primary key,
   user_id     uuid not null default auth.uid() references auth.users on delete cascade,
   log_date    date not null,
-  meal        text not null check (meal in ('desayuno','almuerzo','colacion','cena','otro')),
+  meal        text not null check (meal in ('desayuno','almuerzo','once','cena','snack','colacion','otro')),
   description text not null default '',
   comment     text,
   photo_path  text,
@@ -78,6 +79,9 @@ create table if not exists public.activity_logs (
   activity    text not null,
   minutes     int not null check (minutes > 0 and minutes <= 1440),
   kcal_burned int,
+  steps       int,
+  distance_km numeric,
+  source      text,
   created_at  timestamptz default now()
 );
 create index if not exists activity_logs_user_date on public.activity_logs (user_id, log_date);
@@ -227,8 +231,8 @@ s as (
     m.kcal_target, m.protein_g, coalesce(act.mins, 0) as mins, coalesce(m.weekly_activity_goal_min, 150) as act_goal,
     m.start_weight_kg, w.w_ref, w.w_now,
     case
-      when w.w_ref is null or w.w_now is null or w.w_ref = w.w_now and m.goal <> 'maintain' then 0.5
-      when m.goal = 'lose'  then case when w.w_now < w.w_ref then 1 else 0 end
+      when w.w_ref is null or w.w_now is null or w.w_ref = w.w_now and m.goal in ('lose','lose_tone','gain') then 0.5
+      when m.goal in ('lose','lose_tone') then case when w.w_now < w.w_ref then 1 else 0 end
       when m.goal = 'gain'  then case when w.w_now > w.w_ref then 1 else 0 end
       else case when abs(w.w_now - w.w_ref) / w.w_ref <= 0.01 then 1 else 0.5 end
     end as wscore

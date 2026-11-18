@@ -9,10 +9,39 @@ export const ACTIVITY_LEVELS = {
 };
 
 export const GOALS = {
-  lose:     'Bajar de peso / grasa',
-  maintain: 'Mantener peso',
-  gain:     'Aumentar masa muscular',
+  lose:      'Bajar de peso',
+  lose_tone: 'Bajar de peso y tonificar',
+  recomp:    'Tonificar (bajar grasa sin bajar mucho de peso)',
+  maintain:  'Mantener peso',
+  fitness:   'Mejorar condición física / rendimiento',
+  gain:      'Aumentar masa muscular',
 };
+
+/** Hacia dónde debería moverse el peso según el objetivo */
+export function weightDirection(goal) {
+  if (goal === 'lose' || goal === 'lose_tone') return 'down';
+  if (goal === 'gain') return 'up';
+  return 'stable';
+}
+
+/** Objetivos que usan un ritmo en kg/semana */
+export const usesRate = (goal) => ['lose', 'lose_tone', 'gain'].includes(goal);
+
+/** Edad exacta a partir de la fecha de nacimiento (YYYY-MM-DD) */
+export function ageFromBirth(iso, today = new Date()) {
+  if (!iso) return null;
+  const [y, m, d] = iso.split('-').map(Number);
+  let a = today.getFullYear() - y;
+  const mm = today.getMonth() + 1;
+  if (mm < m || (mm === m && today.getDate() < d)) a--;
+  return a;
+}
+
+/** Convierte "72,5" o "72.5" a número (NaN si no es válido) */
+export function parseNum(v) {
+  const n = parseFloat(String(v ?? '').trim().replace(',', '.'));
+  return Number.isFinite(n) ? n : NaN;
+}
 
 const KCAL_PER_KG = 7700; // energía aproximada de 1 kg de tejido corporal
 
@@ -29,36 +58,41 @@ export function tdee(p) {
 }
 
 /**
- * Meta diaria de calorías y macros.
- * - Bajar: déficit = ritmo (kg/sem) × 7700 / 7, acotado a 300–1000 kcal y nunca bajo el TMB
- *   ni bajo 1200 (mujer) / 1500 (hombre) kcal.
- * - Subir: superávit = ritmo × 7700 / 7, acotado a 150–500 kcal.
- * - Proteína: 2,0 g/kg (bajar), 1,8 g/kg (subir), 1,6 g/kg (mantener).
- * - Grasa: 25% de las kcal (mín. 0,6 g/kg). Carbohidratos: el resto.
+ * Meta diaria de calorías y macros según objetivo.
+ * - Bajar de peso: déficit = ritmo (kg/sem) × 7700 / 7, acotado a 300–1000 kcal. Proteína 2,0 g/kg.
+ * - Bajar y tonificar: igual, con déficit máx. 750 kcal (protege el músculo) y proteína 2,2 g/kg.
+ * - Tonificar (recomposición): déficit leve de 10% (máx. 300 kcal), proteína 2,2 g/kg.
+ * - Mantener: GET, proteína 1,6 g/kg. Condición física: GET, proteína 1,6 g/kg, más carbohidratos.
+ * - Masa muscular: superávit = ritmo × 7700 / 7, acotado a 150–500 kcal, proteína 1,8 g/kg.
+ * Nunca bajo el TMB ni bajo 1200 (mujer) / 1500 (hombre) kcal. Grasa 25% (20% en condición física; mín. 0,6 g/kg).
  */
 export function targets(p) {
   const B = bmr(p);
   const T = tdee(p);
   const rate = Math.max(0, Number(p.rate_kg_week) || 0);
+  const perWeek = (rate * KCAL_PER_KG) / 7;
   let adjust = 0;
   let warning = null;
 
-  if (p.goal === 'lose') {
-    adjust = -Math.min(1000, Math.max(300, (rate * KCAL_PER_KG) / 7));
-  } else if (p.goal === 'gain') {
-    adjust = Math.min(500, Math.max(150, (rate * KCAL_PER_KG) / 7));
+  switch (p.goal) {
+    case 'lose':      adjust = -Math.min(1000, Math.max(300, perWeek)); break;
+    case 'lose_tone': adjust = -Math.min(750, Math.max(300, perWeek)); break;
+    case 'recomp':    adjust = -Math.min(300, T * 0.1); break;
+    case 'gain':      adjust = Math.min(500, Math.max(150, perWeek)); break;
+    default:          adjust = 0;
   }
 
   let kcal = Math.round(T + adjust);
   const floor = Math.max(B, p.sex === 'M' ? 1500 : 1200);
-  if (p.goal === 'lose' && kcal < floor) {
+  if (adjust < 0 && kcal < floor) {
     kcal = Math.round(floor);
     warning = `Ajustamos la meta a ${kcal} kcal para no bajar de tu metabolismo basal / mínimo saludable. El ritmo real será más lento.`;
   }
 
-  const proteinPerKg = p.goal === 'lose' ? 2.0 : p.goal === 'gain' ? 1.8 : 1.6;
+  const proteinPerKg = { lose: 2.0, lose_tone: 2.2, recomp: 2.2, gain: 1.8 }[p.goal] ?? 1.6;
+  const fatShare = p.goal === 'fitness' ? 0.2 : 0.25;
   const protein_g = Math.round(proteinPerKg * p.weight_kg);
-  const fat_g = Math.round(Math.max(0.6 * p.weight_kg, (kcal * 0.25) / 9));
+  const fat_g = Math.round(Math.max(0.6 * p.weight_kg, (kcal * fatShare) / 9));
   const carbs_g = Math.max(0, Math.round((kcal - protein_g * 4 - fat_g * 9) / 4));
 
   const realDeficit = kcal - T;

@@ -3,7 +3,7 @@ const uid = 'u1';
 const today = new Date(); const iso = (d) => d.toISOString().slice(0,10);
 const day = (n) => { const d = new Date(); d.setDate(d.getDate()+n); return iso(d); };
 const db = {
-  profiles: [{ id: uid, display_name: 'Pablo', sex: 'M', age: 40, height_cm: 178, weight_kg: 88, start_weight_kg: 90, target_weight_kg: 82,
+  profiles: [{ id: uid, display_name: 'Pablo', sex: 'M', age: 40, birth_date: '1986-03-10', height_cm: 178, weight_kg: 88, start_weight_kg: 90, target_weight_kg: 82,
     activity_level: 'moderado', goal: 'lose', rate_kg_week: 0.5, weekly_activity_goal_min: 150, bmr: 1798, tdee: 2787, kcal_target: 2237, protein_g: 176, carbs_g: 240, fat_g: 62 }],
   food_logs: [], weight_logs: [], activity_logs: [], groups: [{ id: 'g1', name: 'Los del fútbol', invite_code: 'ABC123', created_by: uid }], group_members: [],
 };
@@ -31,7 +31,7 @@ class Q {
   delete() { this.op = 'delete'; return this; }
   then(res, rej) {
     const T = db[this.t]; const m = (r) => this.f.every((f) => f(r));
-    if (this.op === 'insert') { T.push({ id: id++, user_id: uid, created_at: new Date().toISOString(), ...this.row }); return Promise.resolve({ data: null, error: null }).then(res, rej); }
+    if (this.op === 'insert') { [].concat(this.row).forEach((r) => T.push({ id: id++, user_id: uid, created_at: new Date().toISOString(), ...r })); return Promise.resolve({ data: null, error: null }).then(res, rej); }
     if (this.op === 'update') { T.filter(m).forEach((r) => Object.assign(r, this.row)); return Promise.resolve({ error: null }).then(res, rej); }
     if (this.op === 'upsert') { const e = T.find((r) => r.log_date === this.row.log_date); e ? Object.assign(e, this.row) : T.push({ id: id++, ...this.row }); return Promise.resolve({ error: null }).then(res, rej); }
     if (this.op === 'delete') { db[this.t] = T.filter((r) => !m(r)); return Promise.resolve({ error: null }).then(res, rej); }
@@ -61,7 +61,9 @@ export function createClient() {
       if (fn === 'create_group' || fn === 'join_group') return { data: db.groups[0], error: null };
     },
     storage: { from: () => ({ createSignedUrls: async () => ({ data: [] }), upload: async () => ({ error: null }), remove: async () => ({}) }) },
-    functions: { invoke: async (_n, { body }) => ({ data: { description: 'Porotos con riendas', confidence: 'media', notes: 'Asumí 1 plato hondo (~350 g).',
+    functions: { invoke: async (_n, { body }) => (body.mode === 'activity' ? { data: { notes: 'Leí 2 sesiones.', activities: [
+      { date: day(-1), activity: 'Caminata', minutes: 42, kcal_active: 210, kcal_total: 260, steps: 5400, distance_km: 3.8 },
+      { date: day(-3), activity: 'Fuerza', minutes: 50, kcal_active: 320, kcal_total: 0, steps: 0, distance_km: 0 }] }, error: null } : { data: { description: 'Porotos con riendas', confidence: 'media', notes: 'Asumí 1 plato hondo (~350 g).',
       items: [{ name: 'Porotos con riendas', quantity: '1 plato (350 g)', grams: 350, kcal: 420, protein_g: 21, carbs_g: 68, fat_g: 7 },
               { name: 'Ensalada chilena', quantity: '1/2 taza', grams: 100, kcal: 60, protein_g: 1, carbs_g: 5, fat_g: 4.5 }] }, error: null }) },
   };

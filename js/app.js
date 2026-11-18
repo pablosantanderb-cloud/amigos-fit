@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js';
+import * as C from './calc.js?v=3';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -14,8 +14,53 @@ const r1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
 const fmt = (n) => r0(n).toLocaleString('es-CL');
 const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
 const BASE_URL = location.origin + location.pathname;
+const num = C.parseNum;
+const dec = (v) => (v == null || v === '' ? '' : String(v).replace('.', ','));
+// Campo numérico que acepta coma o punto (type=text evita que iOS bloquee la coma)
+const decInput = (name, value, extra = '') =>
+  `<input name="${name}" type="text" inputmode="decimal" autocomplete="off" pattern="[0-9]+([.,][0-9]+)?" value="${esc(dec(value))}" ${extra}>`;
+const GOAL_SHORT = { lose: 'bajar de peso', lose_tone: 'bajar y tonificar', recomp: 'tonificar', maintain: 'mantener', fitness: 'condición física', gain: 'ganar músculo' };
 
-const MEALS = { desayuno: 'Desayuno', almuerzo: 'Almuerzo', colacion: 'Colación', cena: 'Cena', otro: 'Otros / bebidas' };
+// Llama a la función de IA y devuelve el JSON (o lanza un error legible)
+async function callAI(body) {
+  const { data, error } = await sb.functions.invoke('analyze-food', { body });
+  if (error) {
+    let msg = error.message;
+    try { msg = (await error.context.json()).error || msg; } catch { /* sin cuerpo */ }
+    throw new Error(msg);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+// Selector de foto: cámara o galería (dos inputs, porque "capture" obliga a usar la cámara)
+const photoPicker = (id, title, sub) => `
+  <div class="photo-drop" id="${id}-drop">
+    <div id="${id}-ph"><div style="font-size:2.2rem">📷</div><div><b>${title}</b></div><div class="small">${sub}</div></div>
+  </div>
+  <div class="grid2" style="margin-top:8px">
+    <label class="btn ghost" style="margin:0">📷 Cámara<input id="${id}-cam" type="file" accept="image/*" capture="environment" class="vh"></label>
+    <label class="btn ghost" style="margin:0">🖼️ Galería<input id="${id}-gal" type="file" accept="image/*" class="vh"></label>
+  </div>`;
+function bindPhotoPicker(id, onPick, max) {
+  const handler = async (ev) => {
+    const file = ev.target.files?.[0];
+    ev.target.value = '';
+    if (!file) return;
+    try {
+      const img = await resizeImage(file, max);
+      $(`#${id}-ph`).innerHTML = `<img src="${img.dataUrl}" alt="foto">`;
+      onPick(img);
+    } catch (e) { toast(e.message, true); }
+  };
+  $(`#${id}-cam`).onchange = handler;
+  $(`#${id}-gal`).onchange = handler;
+  $(`#${id}-drop`).onclick = () => $(`#${id}-gal`).click();
+}
+
+const MEALS = { desayuno: 'Desayuno', almuerzo: 'Almuerzo', once: 'Once', cena: 'Cena', snack: 'Snack' };
+// Registros antiguos ("colación" / "otros") se muestran como Snack
+const mealKey = (m) => (m === 'colacion' || m === 'otro' ? 'snack' : m);
 const COLORS = { kcal: '#199407', prot: '#2563eb', carb: '#d97706', fat: '#db2777', target: '#6b7280' };
 const PALETTE = ['#199407', '#2563eb', '#db2777', '#d97706', '#7c3aed', '#0891b2', '#dc2626', '#65a30d', '#c026d3', '#0f766e'];
 
@@ -45,8 +90,9 @@ const shortDate = (iso) => { const [, m, d] = iso.split('-'); return `${d}/${m}`
 function defaultMeal() {
   const h = new Date().getHours();
   if (h < 11) return 'desayuno';
-  if (h < 16) return 'almuerzo';
-  if (h < 19) return 'colacion';
+  if (h < 15) return 'almuerzo';
+  if (h < 17) return 'snack';
+  if (h < 20) return 'once';
   return 'cena';
 }
 
@@ -103,10 +149,18 @@ async function loadProfile() {
   const { data, error } = await sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
   if (error) throw error;
   profile = data;
+  // Si cumplió años desde el último cálculo, recalcula las metas en silencio
+  const age = C.ageFromBirth(profile?.birth_date);
+  if (age && profile.kcal_target && age !== profile.age) {
+    const t = C.targets({ ...profile, age });
+    const upd = { age, bmr: t.bmr, tdee: t.tdee, kcal_target: t.kcal_target, protein_g: t.protein_g, carbs_g: t.carbs_g, fat_g: t.fat_g };
+    const { error: e2 } = await sb.from('profiles').update(upd).eq('id', session.user.id);
+    if (!e2) Object.assign(profile, upd);
+  }
   return profile;
 }
 
-const profileComplete = () => profile && profile.kcal_target && profile.weight_kg;
+const profileComplete = () => profile && profile.kcal_target && profile.weight_kg && profile.birth_date;
 
 async function route() {
   clearCharts();
@@ -227,16 +281,16 @@ async function viewProfile() {
   const first = !profileComplete();
   const opt = (obj, val) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === val ? 'selected' : ''}>${esc(v.label ?? v)}</option>`).join('');
   app.innerHTML = `
-  <h1>${first ? '¡Bienvenido/a! 👋' : 'Mi perfil'}</h1>
-  ${first ? `<p class="muted">Completa tus datos para calcular tu plan personalizado.</p>` : ''}
+  <h1>${first ? (p.kcal_target ? 'Actualiza tu perfil' : '¡Bienvenido/a! 👋') : 'Mi perfil'}</h1>
+  ${first ? `<p class="muted">${p.kcal_target ? 'Agregamos la fecha de nacimiento para calcular tu edad exacta. Complétala para continuar.' : 'Completa tus datos para calcular tu plan personalizado.'}</p>` : ''}
   <form id="f" class="card">
     <label>Nombre</label><input name="display_name" required maxlength="40" value="${esc(p.display_name)}">
     <div class="grid2">
       <div><label>Sexo</label><select name="sex" required><option value="">—</option>
         <option value="M" ${p.sex === 'M' ? 'selected' : ''}>Hombre</option><option value="F" ${p.sex === 'F' ? 'selected' : ''}>Mujer</option></select></div>
-      <div><label>Edad</label><input name="age" type="number" inputmode="numeric" min="12" max="100" required value="${p.age ?? ''}"></div>
-      <div><label>Peso actual (kg)</label><input name="weight_kg" type="number" inputmode="decimal" step="0.1" min="30" max="300" required value="${p.weight_kg ?? ''}"></div>
-      <div><label>Estatura (cm)</label><input name="height_cm" type="number" inputmode="numeric" min="100" max="250" required value="${p.height_cm ?? ''}"></div>
+      <div><label>Fecha de nacimiento <span id="ageTxt"></span></label><input name="birth_date" type="date" required min="1920-01-01" max="${C.addDays(C.isoDate(), -365 * 12)}" value="${p.birth_date ?? ''}"></div>
+      <div><label>Peso actual (kg)</label>${decInput('weight_kg', p.weight_kg, 'required placeholder="Ej: 78,5"')}</div>
+      <div><label>Estatura (cm)</label>${decInput('height_cm', p.height_cm, 'required placeholder="Ej: 172"')}</div>
     </div>
     <label>Nivel de actividad física</label>
     <select name="activity_level" required>${opt(C.ACTIVITY_LEVELS, p.activity_level || 'ligero')}</select>
@@ -245,7 +299,7 @@ async function viewProfile() {
     <div class="grid2" id="rateRow">
       <div><label>Ritmo (kg/semana)</label>
         <select name="rate_kg_week">${[0.25, 0.5, 0.75, 1].map((r) => `<option value="${r}" ${Number(p.rate_kg_week ?? 0.5) === r ? 'selected' : ''}>${String(r).replace('.', ',')} kg</option>`).join('')}</select></div>
-      <div><label>Peso meta (opcional)</label><input name="target_weight_kg" type="number" inputmode="decimal" step="0.1" value="${p.target_weight_kg ?? ''}"></div>
+      <div><label>Peso meta (opcional)</label>${decInput('target_weight_kg', p.target_weight_kg, 'placeholder="Ej: 72,5"')}</div>
     </div>
     <label>Meta semanal de actividad física (minutos)</label>
     <input name="weekly_activity_goal_min" type="number" inputmode="numeric" min="0" max="3000" step="10" value="${p.weekly_activity_goal_min ?? 150}">
@@ -267,12 +321,14 @@ async function viewProfile() {
   const form = $('#f');
   const read = () => {
     const f = Object.fromEntries(new FormData(form));
-    return { ...f, age: +f.age, weight_kg: +f.weight_kg, height_cm: +f.height_cm, rate_kg_week: f.goal === 'maintain' ? 0 : +f.rate_kg_week };
+    return { ...f, age: C.ageFromBirth(f.birth_date), weight_kg: num(f.weight_kg), height_cm: num(f.height_cm), rate_kg_week: C.usesRate(f.goal) ? +f.rate_kg_week : 0 };
   };
+  const valid = (f) => f.sex && f.age >= 12 && f.age <= 100 && f.weight_kg >= 30 && f.weight_kg <= 300 && f.height_cm >= 100 && f.height_cm <= 250;
   const update = () => {
     const f = read();
-    $('#rateRow').style.display = f.goal === 'maintain' ? 'none' : '';
-    if (!f.sex || !f.age || !f.weight_kg || !f.height_cm) { $('#calc').innerHTML = '<span class="muted small">Completa sexo, edad, peso y estatura para ver tu plan.</span>'; return; }
+    $('#rateRow').querySelector('div').style.display = C.usesRate(f.goal) ? '' : 'none';
+    $('#ageTxt').textContent = f.age ? `· ${f.age} años` : '';
+    if (!valid(f)) { $('#calc').innerHTML = '<span class="muted small">Completa sexo, fecha de nacimiento, peso (30–300 kg) y estatura (100–250 cm) para ver tu plan.</span>'; return; }
     const t = C.targets(f);
     const adj = t.adjust === 0 ? 'Sin ajuste (mantención)' : t.adjust < 0 ? `Déficit de ${fmt(-t.adjust)} kcal/día (≈ ${String(Math.abs(t.weeklyChangeKg)).replace('.', ',')} kg/semana)` : `Superávit de ${fmt(t.adjust)} kcal/día`;
     $('#calc').innerHTML = `
@@ -294,12 +350,13 @@ async function viewProfile() {
   form.onsubmit = async (ev) => {
     ev.preventDefault();
     const f = read();
+    if (!valid(f)) return toast('Revisa fecha de nacimiento, peso y estatura', true);
     const t = C.targets(f);
     const btn = form.querySelector('button'); busy(btn, true, 'Guardando…');
     const row = {
-      display_name: f.display_name.trim(), sex: f.sex, age: f.age, weight_kg: f.weight_kg, height_cm: f.height_cm,
+      display_name: f.display_name.trim(), sex: f.sex, age: f.age, birth_date: f.birth_date, weight_kg: f.weight_kg, height_cm: f.height_cm,
       activity_level: f.activity_level, goal: f.goal, rate_kg_week: f.rate_kg_week,
-      target_weight_kg: f.target_weight_kg ? +f.target_weight_kg : null,
+      target_weight_kg: num(f.target_weight_kg) || null,
       weekly_activity_goal_min: +f.weekly_activity_goal_min || 0,
       start_weight_kg: p.start_weight_kg ?? f.weight_kg,
       bmr: t.bmr, tdee: t.tdee, kcal_target: t.kcal_target, protein_g: t.protein_g, carbs_g: t.carbs_g, fat_g: t.fat_g,
@@ -369,8 +426,9 @@ async function viewToday() {
     (data || []).forEach((x) => { if (x.signedUrl) urls[x.path] = x.signedUrl; });
   }
 
-  const byMeal = Object.keys(MEALS).map((m) => ({ m, items: logs.filter((l) => l.meal === m) })).filter((g) => g.items.length);
+  const byMeal = Object.keys(MEALS).map((m) => ({ m, items: logs.filter((l) => mealKey(l.meal) === m) })).filter((g) => g.items.length);
   const actMin = (acts.data || []).reduce((a, x) => a + x.minutes, 0);
+  const actKcal = (acts.data || []).reduce((a, x) => a + (x.kcal_burned || 0), 0);
 
   app.innerHTML = `
   <div class="date-nav">
@@ -387,7 +445,7 @@ async function viewToday() {
         <div class="kpi"><span class="muted">Consumido</span><b>${fmt(tot.kcal)}</b></div>
         <div class="kpi"><span class="muted">${remaining >= 0 ? 'Te quedan' : 'Te pasaste'}</span>
           <b style="color:${remaining >= 0 ? 'var(--accent)' : 'var(--danger)'}">${fmt(Math.abs(remaining))}</b></div>
-        <div class="kpi"><span class="muted">Actividad</span><b>${actMin} min</b></div>
+        <div class="kpi"><span class="muted">Ejercicio</span><b>${actMin} min${actKcal ? ` · ${fmt(actKcal)} kcal` : ''}</b></div>
       </div>
     </div>
     ${macroBar('🥩 Proteínas', tot.protein_g, P.protein_g, COLORS.prot)}
@@ -412,22 +470,32 @@ async function viewToday() {
 
   <div class="card">
     <h2>⚖️ Peso y medidas</h2>
-    <form id="wf" class="grid3">
-      <div><label>Peso (kg)</label><input name="weight_kg" type="number" inputmode="decimal" step="0.1" min="30" max="300" value="${weight.data?.weight_kg ?? ''}" required></div>
-      <div><label>Cintura (cm)</label><input name="waist_cm" type="number" inputmode="decimal" step="0.5" value="${weight.data?.waist_cm ?? ''}"></div>
-      <div><label>% grasa</label><input name="body_fat_pct" type="number" inputmode="decimal" step="0.1" value="${weight.data?.body_fat_pct ?? ''}"></div>
+    <form id="wf" class="grid2">
+      <div><label>Peso (kg)</label>${decInput('weight_kg', weight.data?.weight_kg, 'required placeholder="Ej: 78,5"')}</div>
+      <div><label>Cintura (cm, opcional)</label>${decInput('waist_cm', weight.data?.waist_cm, 'placeholder="Ej: 92"')}</div>
       <button class="btn ghost" style="grid-column:1/-1">${weight.data ? 'Actualizar' : 'Guardar'} peso</button>
     </form>
+    <p class="small muted">Se guarda en el día que estás viendo (${prettyDate(d).toLowerCase()}). Usa ‹ › arriba para registrar días anteriores.</p>
   </div>
 
   <div class="card">
     <h2>🏃 Actividad física</h2>
-    ${(acts.data || []).map((a) => `<div class="row between food"><div class="info"><div class="name">${esc(a.activity)}</div>
-      <div class="mac">${a.minutes} min${a.kcal_burned ? ` · ~${a.kcal_burned} kcal` : ''}</div></div>
-      <button class="icon-btn" data-delact="${a.id}">🗑️</button></div>`).join('')}
-    <form id="af" class="grid3" style="margin-top:6px">
-      <div style="grid-column:span 2"><label>Actividad</label><input name="activity" list="acts" required placeholder="Ej: Caminar, pesas, fútbol"></div>
-      <div><label>Minutos</label><input name="minutes" type="number" inputmode="numeric" min="1" max="1440" required></div>
+    ${(acts.data || []).map((a) => `<div class="row between food"><div class="info"><div class="name">${a.source === 'reloj' ? '⌚ ' : ''}${esc(a.activity)}</div>
+      <div class="mac">${a.minutes} min${a.kcal_burned ? ` · ${fmt(a.kcal_burned)} kcal` : ''}${a.steps ? ` · ${fmt(a.steps)} pasos` : ''}${a.distance_km ? ` · ${dec(r1(a.distance_km))} km` : ''}</div></div>
+      <button class="icon-btn" data-delact="${a.id}">🗑️</button></div>`).join('') || `<p class="muted small">Sin actividad registrada ${d === C.isoDate() ? 'hoy' : 'este día'}.</p>`}
+
+    <h3>⌚ Desde tu reloj o smart band</h3>
+    <p class="small muted">Sube un pantallazo de la app de tu reloj (Apple Fitness, Garmin, Huawei Health, Zepp, Mi Fitness, Samsung Health…). La IA lee el ejercicio, minutos y kcal. Si el pantallazo muestra varios días, los separa por fecha.</p>
+    ${photoPicker('act', 'Pantallazo del reloj', 'resumen del entrenamiento o del día')}
+    <button id="actAnalyze" class="btn block" style="margin-top:8px">✨ Leer pantallazo</button>
+    <div id="actResult"></div>
+
+    <h3>✍️ O ingrésala a mano</h3>
+    <form id="af" class="grid2">
+      <div style="grid-column:1/-1"><label>Actividad</label><input name="activity" list="acts" required placeholder="Ej: Caminar, pesas, fútbol"></div>
+      <div><label>Minutos</label><input name="minutes" type="text" inputmode="numeric" pattern="[0-9]+" required></div>
+      <div><label>kcal (opcional)</label><input name="kcal" type="text" inputmode="numeric" pattern="[0-9]+"></div>
+      <div style="grid-column:1/-1"><label>Fecha</label><input name="date" type="date" value="${d}" max="${C.isoDate()}" required></div>
       <datalist id="acts">${['Caminar', 'Correr', 'Pesas / gimnasio', 'Bicicleta', 'Natación', 'Fútbol', 'Pádel / tenis', 'Yoga / pilates', 'Baile', 'Trekking', 'Crossfit / HIIT'].map((x) => `<option value="${x}">`).join('')}</datalist>
       <button class="btn ghost" style="grid-column:1/-1">Agregar actividad</button>
     </form>
@@ -453,7 +521,9 @@ async function viewToday() {
   $('#wf').onsubmit = async (ev) => {
     ev.preventDefault();
     const f = Object.fromEntries(new FormData(ev.target));
-    const row = { user_id: uid, log_date: d, weight_kg: +f.weight_kg, waist_cm: f.waist_cm ? +f.waist_cm : null, body_fat_pct: f.body_fat_pct ? +f.body_fat_pct : null };
+    const w = num(f.weight_kg);
+    if (!(w >= 30 && w <= 300)) return toast('Ingresa un peso válido, ej: 78,5', true);
+    const row = { user_id: uid, log_date: d, weight_kg: w, waist_cm: num(f.waist_cm) || null };
     const { error } = await sb.from('weight_logs').upsert(row, { onConflict: 'user_id,log_date' });
     if (error) return toast(error.message, true);
     // Si es el registro más reciente, actualiza el peso del perfil y recalcula metas
@@ -471,10 +541,65 @@ async function viewToday() {
   $('#af').onsubmit = async (ev) => {
     ev.preventDefault();
     const f = Object.fromEntries(new FormData(ev.target));
-    const { error } = await sb.from('activity_logs').insert({ log_date: d, activity: f.activity.trim(), minutes: +f.minutes });
+    const minutes = parseInt(f.minutes, 10);
+    if (!(minutes > 0)) return toast('Ingresa los minutos', true);
+    const { error } = await sb.from('activity_logs').insert({ log_date: f.date || d, activity: f.activity.trim(), minutes, kcal_burned: parseInt(f.kcal, 10) || null, source: 'manual' });
     if (error) return toast(error.message, true);
-    toast('Actividad registrada 💪');
+    toast(f.date && f.date !== d ? `Actividad registrada el ${shortDate(f.date)} 💪` : 'Actividad registrada 💪');
     route();
+  };
+
+  // --- Pantallazo del reloj
+  let shot = null;
+  let found = [];
+  bindPhotoPicker('act', (img) => { shot = img; }, 1600);
+  const renderActs = () => {
+    $('#actResult').innerHTML = found.length ? `
+      <div style="margin-top:10px">${found.map((a, i) => `<div class="item" data-i="${i}">
+        <div class="row"><input data-k="activity" value="${esc(a.activity)}" placeholder="Actividad"><button type="button" class="icon-btn" data-rma="${i}">✕</button></div>
+        <div class="item-nums">
+          <div><span class="small muted">Fecha</span><input data-k="date" type="date" max="${C.isoDate()}" value="${esc(a.date)}"></div>
+          <div><span class="small muted">Minutos</span><input data-k="minutes" type="text" inputmode="numeric" value="${a.minutes ?? ''}"></div>
+          <div><span class="small muted">kcal</span><input data-k="kcal" type="text" inputmode="numeric" value="${a.kcal ?? ''}"></div>
+          <div><span class="small muted">Pasos</span><input data-k="steps" type="text" inputmode="numeric" value="${a.steps ?? ''}"></div>
+        </div></div>`).join('')}
+        <button id="actSave" class="btn block" style="margin-top:8px">Guardar ${found.length > 1 ? `${found.length} actividades` : 'actividad'}</button>
+      </div>` : '';
+    $$('#actResult .item input').forEach((inp) => (inp.onchange = () => {
+      const a = found[+inp.closest('.item').dataset.i];
+      a[inp.dataset.k] = ['minutes', 'kcal', 'steps'].includes(inp.dataset.k) ? (parseInt(inp.value, 10) || null) : inp.value;
+    }));
+    $$('[data-rma]').forEach((b) => (b.onclick = () => { found.splice(+b.dataset.rma, 1); renderActs(); }));
+    if (found.length) $('#actSave').onclick = async () => {
+      const rows = found.filter((a) => a.activity && (a.minutes > 0 || a.kcal > 0)).map((a) => ({
+        log_date: a.date && a.date <= C.isoDate() ? a.date : d, activity: a.activity.trim().slice(0, 60),
+        minutes: Math.max(1, a.minutes || 1), kcal_burned: a.kcal || null, steps: a.steps || null,
+        distance_km: a.distance_km || null, source: 'reloj',
+      }));
+      if (!rows.length) return toast('Revisa que cada actividad tenga nombre y minutos o kcal', true);
+      const btn = $('#actSave'); busy(btn, true, 'Guardando…');
+      const { error } = await sb.from('activity_logs').insert(rows);
+      if (error) { busy(btn, false); return toast(error.message, true); }
+      const otherDays = [...new Set(rows.map((r) => r.log_date))].filter((x) => x !== d);
+      toast(otherDays.length ? `Guardado (incluye ${otherDays.map(shortDate).join(', ')}) ⌚` : 'Actividad guardada ⌚');
+      route();
+    };
+  };
+  $('#actAnalyze').onclick = async () => {
+    if (!shot) return toast('Primero elige un pantallazo', true);
+    const btn = $('#actAnalyze'); busy(btn, true, 'Leyendo…');
+    try {
+      const data = await callAI({ mode: 'activity', image: shot.base64, mimeType: 'image/jpeg', today: C.isoDate(), viewing: d });
+      found = (data.activities || []).map((a) => ({
+        activity: a.activity || 'Actividad', date: /^\d{4}-\d{2}-\d{2}$/.test(a.date || '') ? a.date : d,
+        minutes: Math.round(a.minutes) || null, kcal: Math.round(a.kcal_active || a.kcal_total) || null,
+        steps: Math.round(a.steps) || null, distance_km: a.distance_km || null,
+      }));
+      if (!found.length) toast(data.notes || 'No encontré actividad en el pantallazo', true);
+      else if (data.notes) toast(data.notes);
+      renderActs();
+    } catch (e) { toast(e.message, true); }
+    finally { busy(btn, false); }
   };
 }
 
@@ -502,30 +627,24 @@ async function viewRegister() {
   app.innerHTML = `
   <h1>Registrar comida</h1>
   <div class="card">
-    <div class="grid2">
-      <div><label>Comida</label><select id="meal">${Object.entries(MEALS).map(([k, v]) => `<option value="${k}" ${k === defaultMeal() ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
-      <div><label>Fecha</label><input id="date" type="date" value="${state.date}" max="${C.isoDate()}"></div>
-    </div>
-    <label>Foto del alimento</label>
-    <label class="photo-drop" id="drop">
-      <input id="file" type="file" accept="image/*" capture="environment">
-      <div id="ph"><div style="font-size:2.4rem">📷</div><div><b>Toma o elige una foto</b></div><div class="small">del plato, colación o bebida</div></div>
-    </label>
-    <label>Comentario (opcional)</label>
-    <textarea id="comment" maxlength="500" placeholder="Ej: arroz con pollo, la porción de arroz era como 1 taza; le eché 1 cucharada de aceite. Me comí la mitad."></textarea>
+    <label style="margin-top:0">Comida</label>
+    <div class="seg" id="mealSeg">${Object.entries(MEALS).map(([k, v]) => `<button type="button" data-meal="${k}" class="${k === defaultMeal() ? 'active' : ''}">${v}</button>`).join('')}</div>
+    <input id="meal" type="hidden" value="${defaultMeal()}">
+    <label>Fecha</label><input id="date" type="date" value="${state.date}" max="${C.isoDate()}">
+    <label>Foto (recomendada)</label>
+    ${photoPicker('food', 'Toma una foto o elige una de tu galería', 'la foto mejora la estimación de porciones')}
+    <label>¿Qué comiste? <span class="muted">(obligatorio si no hay foto)</span></label>
+    <textarea id="comment" maxlength="500" placeholder="Ej: 2 huevos duros y una marraqueta con palta. Con foto puedes agregar detalles: 'le eché 1 cucharada de aceite', 'me comí la mitad'."></textarea>
     <button id="analyze" class="btn block" style="margin-top:12px">✨ Analizar con IA</button>
     <button id="manual" class="btn ghost block" style="margin-top:8px">✍️ Ingresar valores a mano</button>
   </div>
   <div id="result"></div>`;
 
-  $('#file').onchange = async (ev) => {
-    const file = ev.target.files?.[0];
-    if (!file) return;
-    try {
-      photo = await resizeImage(file);
-      $('#ph').innerHTML = `<img src="${photo.dataUrl}" alt="foto">`;
-    } catch (e) { toast(e.message, true); }
-  };
+  bindPhotoPicker('food', (img) => { photo = img; }, 1024);
+  $$('#mealSeg button').forEach((b) => (b.onclick = () => {
+    $$('#mealSeg button').forEach((x) => x.classList.toggle('active', x === b));
+    $('#meal').value = b.dataset.meal;
+  }));
 
   const renderResult = () => {
     const tot = C.sumLogs(items);
@@ -541,7 +660,7 @@ async function viewRegister() {
           ${it.quantity ? `<div class="small muted">${esc(it.quantity)}</div>` : ''}
           <div class="item-nums">
             ${[['kcal', 'kcal'], ['protein_g', 'Prot g'], ['carbs_g', 'Carb g'], ['fat_g', 'Grasa g']].map(([k, l]) => `<div><span class="small muted">${l}</span>
-              <input data-k="${k}" type="number" inputmode="decimal" step="0.1" min="0" value="${r1(it[k])}"></div>`).join('')}
+              <input data-k="${k}" type="text" inputmode="decimal" autocomplete="off" value="${dec(r1(it[k]))}"></div>`).join('')}
           </div></div>`).join('')}
         <div class="item-total"><b>Total</b><span><b>${fmt(tot.kcal)}</b> kcal · P ${r0(tot.protein_g)} · C ${r0(tot.carbs_g)} · G ${r0(tot.fat_g)}</span></div>
       </div>
@@ -552,7 +671,7 @@ async function viewRegister() {
 
     $$('#result .item input').forEach((inp) => (inp.onchange = () => {
       const i = +inp.closest('.item').dataset.i;
-      items[i][inp.dataset.k] = inp.dataset.k === 'name' ? inp.value : +inp.value || 0;
+      items[i][inp.dataset.k] = inp.dataset.k === 'name' ? inp.value : Math.max(0, num(inp.value) || 0);
       meta.description = $('#desc').value;
       renderResult();
     }));
@@ -569,18 +688,10 @@ async function viewRegister() {
 
   $('#analyze').onclick = async () => {
     const comment = $('#comment').value.trim();
-    if (!photo && !comment) return toast('Toma una foto o escribe qué comiste', true);
+    if (!photo && !comment) { $('#comment').focus(); return toast('Toma una foto o escribe qué comiste (ej: "Huevo duro")', true); }
     const btn = $('#analyze'); busy(btn, true, 'Analizando…');
     try {
-      const { data, error } = await sb.functions.invoke('analyze-food', {
-        body: { image: photo?.base64, mimeType: 'image/jpeg', comment, meal: MEALS[$('#meal').value] },
-      });
-      if (error) {
-        let msg = error.message;
-        try { msg = (await error.context.json()).error || msg; } catch { /* sin cuerpo */ }
-        throw new Error(msg);
-      }
-      if (data.error) throw new Error(data.error);
+      const data = await callAI({ image: photo?.base64, mimeType: 'image/jpeg', comment, meal: MEALS[$('#meal').value] });
       items = (data.items || []).map((it) => ({ ...it }));
       meta = { description: data.description || '', confidence: data.confidence, notes: data.notes || '' };
       if (!items.length) { toast(data.notes || 'No se reconoció comida en la imagen', true); items = [{ name: '', kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }]; }
@@ -625,7 +736,7 @@ async function viewProgress() {
   const [food, weights, acts] = await Promise.all([
     sb.from('food_logs').select('log_date,kcal,protein_g,carbs_g,fat_g').gte('log_date', from).lte('log_date', to),
     sb.from('weight_logs').select('log_date,weight_kg,waist_cm').order('log_date'),
-    sb.from('activity_logs').select('log_date,minutes').gte('log_date', from).lte('log_date', to),
+    sb.from('activity_logs').select('log_date,minutes,kcal_burned').gte('log_date', from).lte('log_date', to),
   ]);
   if (food.error) throw food.error;
   const P = profile;
@@ -633,9 +744,12 @@ async function viewProgress() {
   // agregación diaria
   const days = [];
   for (let d = from; d <= to; d = C.addDays(d, 1)) days.push(d);
-  const daily = Object.fromEntries(days.map((d) => [d, { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, n: 0, act: 0 }]));
+  const daily = Object.fromEntries(days.map((d) => [d, { kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, n: 0, act: 0, burn: 0 }]));
   (food.data || []).forEach((l) => { const x = daily[l.log_date]; if (!x) return; x.kcal += +l.kcal; x.protein_g += +l.protein_g; x.carbs_g += +l.carbs_g; x.fat_g += +l.fat_g; x.n++; });
-  (acts.data || []).forEach((a) => { if (daily[a.log_date]) daily[a.log_date].act += a.minutes; });
+  (acts.data || []).forEach((a) => { if (daily[a.log_date]) { daily[a.log_date].act += a.minutes; daily[a.log_date].burn += a.kcal_burned || 0; } });
+  const totalBurn = days.reduce((a, d) => a + daily[d].burn, 0);
+  const dir = C.weightDirection(P.goal);
+  const goodDelta = (x) => (dir === 'down' ? x < 0 : dir === 'up' ? x > 0 : Math.abs(x) < 0.5);
 
   const logged = days.filter((d) => daily[d].n > 0);
   const kcalOk = logged.filter((d) => Math.abs(daily[d].kcal - P.kcal_target) <= P.kcal_target * 0.1).length;
@@ -661,7 +775,7 @@ async function viewProgress() {
     return { w, ds: ds.length, lg: lg.length, kcal: a('kcal'), prot: a('protein_g'), ok: lg.filter((d) => Math.abs(daily[d].kcal - P.kcal_target) <= P.kcal_target * 0.1).length, act: ds.reduce((s, d) => s + daily[d].act, 0), delta, last: last?.weight_kg };
   });
 
-  const goalTxt = P.goal === 'lose' ? 'bajar' : P.goal === 'gain' ? 'subir' : 'mantener';
+  const goalTxt = GOAL_SHORT[P.goal] || '—';
   app.innerHTML = `
   <h1>Mi progreso</h1>
   <div class="tabs">${[7, 30, 90].map((r) => `<button data-r="${r}" class="${state.range === r ? 'active' : ''}">${r} días</button>`).join('')}</div>
@@ -671,8 +785,8 @@ async function viewProgress() {
     <div class="stat"><div class="v">${pct(kcalOk, days.length)}%</div><div class="l">Días en meta calórica (±10%)</div></div>
     <div class="stat"><div class="v">${pct(protOk, days.length)}%</div><div class="l">Días cumpliendo proteína</div></div>
     <div class="stat"><div class="v">${fmt(avg('kcal'))}</div><div class="l">kcal promedio (meta ${fmt(P.kcal_target)})</div></div>
-    <div class="stat"><div class="v">${totalAct} min</div><div class="l">Actividad (meta ${r0(P.weekly_activity_goal_min * days.length / 7)} min)</div></div>
-    <div class="stat"><div class="v" style="color:${(P.goal === 'lose' && wDiff < 0) || (P.goal === 'gain' && wDiff > 0) ? 'var(--accent)' : 'inherit'}">${wDiff > 0 ? '+' : ''}${String(wDiff).replace('.', ',')} kg</div><div class="l">Desde el inicio (${String(wStart).replace('.', ',')} → ${String(wNow).replace('.', ',')} kg) · objetivo: ${goalTxt}</div></div>
+    <div class="stat"><div class="v">${totalAct} min</div><div class="l">Actividad (meta ${r0(P.weekly_activity_goal_min * days.length / 7)} min)${totalBurn ? ` · ${fmt(totalBurn)} kcal quemadas` : ''}</div></div>
+    <div class="stat"><div class="v" style="color:${wDiff !== 0 && goodDelta(wDiff) ? 'var(--accent)' : 'inherit'}">${wDiff > 0 ? '+' : ''}${String(wDiff).replace('.', ',')} kg</div><div class="l">Desde el inicio (${String(wStart).replace('.', ',')} → ${String(wNow).replace('.', ',')} kg) · objetivo: ${goalTxt}</div></div>
   </div></div>
 
   <div class="card"><h2>🔥 Calorías vs meta</h2><div class="chart-box"><canvas id="cKcal"></canvas></div></div>
@@ -686,7 +800,7 @@ async function viewProgress() {
     <thead><tr><th>Semana</th><th>Días reg.</th><th>kcal prom.</th><th>En meta</th><th>Prot. prom.</th><th>Actividad</th><th>Peso</th></tr></thead>
     <tbody>${wRows.map((r) => `<tr><td>${shortDate(r.w)}</td><td>${r.lg}/${r.ds}</td><td>${r.kcal == null ? '—' : fmt(r.kcal)}</td><td>${r.ok}</td>
       <td>${r.prot == null ? '—' : r0(r.prot) + ' g'}</td><td>${r.act} min</td>
-      <td>${r.last ? String(r.last).replace('.', ',') : '—'}${r.delta != null ? ` <span class="small" style="color:${(P.goal === 'lose' ? r.delta < 0 : P.goal === 'gain' ? r.delta > 0 : Math.abs(r.delta) < 0.5) ? 'var(--accent)' : 'var(--muted)'}">(${r.delta > 0 ? '+' : ''}${String(r.delta).replace('.', ',')})</span>` : ''}</td></tr>`).join('')}
+      <td>${r.last ? String(r.last).replace('.', ',') : '—'}${r.delta != null ? ` <span class="small" style="color:${goodDelta(r.delta) ? 'var(--accent)' : 'var(--muted)'}">(${r.delta > 0 ? '+' : ''}${String(r.delta).replace('.', ',')})</span>` : ''}</td></tr>`).join('')}
     </tbody></table></div></div>`;
 
   $$('.tabs button').forEach((b) => (b.onclick = () => { state.range = +b.dataset.r; route(); }));
@@ -819,7 +933,8 @@ async function viewFriends() {
   const progressPct = (r) => {
     if (!r.start_weight || !r.current_weight) return null;
     const ch = ((r.current_weight - r.start_weight) / r.start_weight) * 100;
-    return r.goal === 'lose' ? -ch : r.goal === 'gain' ? ch : -Math.abs(ch);
+    const dr = C.weightDirection(r.goal);
+    return dr === 'down' ? -ch : dr === 'up' ? ch : -Math.abs(ch);
   };
   const awards = {
     [best((r) => r.days_logged)]: ['🔥 Más constante'],
@@ -828,13 +943,12 @@ async function viewFriends() {
   add(best((r) => r.protein_ok_days), '🥩 Rey/Reina de la proteína');
   add(best((r) => r.kcal_ok_days), '🎯 Más precisión calórica');
   add(best((r) => r.activity_min), '🏃 Más activo/a');
-  add(best((r) => (r.goal === 'maintain' ? null : progressPct(r))), '📈 Mayor avance vs su inicio');
+  add(best((r) => (C.weightDirection(r.goal) === 'stable' ? null : progressPct(r))), '📈 Mayor avance vs su inicio');
   delete awards.undefined;
 
   const medal = (i) => ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
   const mini = (label, v, max, txt, color = 'var(--accent)') => `<div class="mini"><span class="muted">${label}</span>
     <div class="bar"><i style="width:${Math.min(100, pct(v, max))}%;background:${color}"></i></div><span>${txt}</span></div>`;
-  const goalTxt = { lose: 'bajar', gain: 'subir', maintain: 'mantener' };
 
   $('#board').innerHTML = `<h2>🏆 Ranking — ${state.groupRange} días</h2>` + rows.map((r, i) => {
     const pp = progressPct(r);
@@ -844,13 +958,13 @@ async function viewFriends() {
       <div class="pos">${medal(i)}</div>
       <div class="body">
         <div class="row between"><div><b>${esc(r.display_name)}</b>${r.user_id === session.user.id ? ' <span class="small muted">(tú)</span>' : ''}
-          <div class="small muted">Objetivo: ${goalTxt[r.goal] || '—'}${ch != null ? ` · ${ch > 0 ? '+' : ''}${String(ch).replace('.', ',')} kg desde el inicio` : ''}</div></div>
+          <div class="small muted">Objetivo: ${GOAL_SHORT[r.goal] || '—'}${ch != null ? ` · ${ch > 0 ? '+' : ''}${String(ch).replace('.', ',')} kg desde el inicio` : ''}</div></div>
           <div class="score">${r.score}</div></div>
         ${mini('Constancia', r.days_logged, r.days_in_range, `${r.days_logged}/${r.days_in_range} d`)}
         ${mini('Calorías ok', r.kcal_ok_days, r.days_in_range, `${r.kcal_ok_days} d`, COLORS.kcal)}
         ${mini('Proteína ok', r.protein_ok_days, r.days_in_range, `${r.protein_ok_days} d`, COLORS.prot)}
         ${mini('Actividad', r.activity_min, actGoal, `${r.activity_min} min`, COLORS.carb)}
-        ${pp != null && r.goal !== 'maintain' ? mini('Avance peso', Math.max(0, pp), 10, `${ch > 0 ? '+' : ''}${String(r1(ch / r.start_weight * 100)).replace('.', ',')}%`, COLORS.fat) : ''}
+        ${pp != null && C.weightDirection(r.goal) !== 'stable' ? mini('Avance peso', Math.max(0, pp), 10, `${ch > 0 ? '+' : ''}${String(r1(ch / r.start_weight * 100)).replace('.', ',')}%`, COLORS.fat) : ''}
         ${awards[r.user_id] ? `<div class="chips">${awards[r.user_id].map((a) => `<span class="chip">${a}</span>`).join('')}</div>` : ''}
       </div></div>`;
   }).join('') + (rows.length === 1 ? '<p class="small muted">¡Invita a tus amigos para empezar a comparar!</p>' : '');

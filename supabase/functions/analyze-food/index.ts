@@ -20,7 +20,7 @@ Analiza la comida y estima, para la porción que se va a consumir:
 - cada alimento identificable, su cantidad aproximada (en gramos o ml) y sus calorías, proteínas, carbohidratos y grasas.
 - usa valores de referencia de tablas nutricionales (USDA / tabla de composición de alimentos de Chile).
 - si el usuario escribió un comentario, TIENE PRIORIDAD sobre lo que ves (cantidades, ingredientes ocultos, marcas, preparación, si comió solo una parte, etc.).
-- si no hay foto, estima solo a partir del comentario.
+- si no hay foto, estima solo a partir del texto (ej. "Huevo duro"); si no se indica cantidad, asume una porción estándar (1 unidad, 1 plato o 1 taza) e indícalo en notes.
 - estima porciones con referencias visuales (plato ~26 cm, cubiertos, manos, envases).
 - incluye aceites, aderezos, salsas y bebidas visibles o mencionadas.
 - si la imagen no contiene comida, devuelve items vacío y explícalo en notes.
@@ -54,6 +54,38 @@ const SCHEMA = {
   required: ["description", "items", "total", "confidence"],
 };
 
+// ---- Modo "activity": pantallazo de la app del reloj / smart band
+const ACTIVITY_PROMPT = `Eres un asistente que lee pantallazos de apps de relojes y bandas deportivas
+(Apple Fitness/Salud, Garmin Connect, Huawei Health, Zepp/Amazfit, Mi Fitness, Samsung Health, Fitbit, Polar, Strava, etc.).
+Extrae cada sesión de ejercicio visible: tipo de actividad en español (ej. "Caminata", "Carrera", "Fuerza", "Bicicleta"),
+duración en minutos, calorías ACTIVAS (de movimiento/ejercicio; si solo aparecen calorías totales, úsalas en kcal_total),
+pasos y distancia en km si aparecen, y la fecha de esa sesión en formato YYYY-MM-DD.
+Reglas para la fecha: usa la fecha visible en la imagen; textos como "Hoy", "Ayer", "lun", "12 nov" interprétalos
+respecto de la fecha de hoy indicada. Nunca devuelvas una fecha futura. Si no hay fecha visible, deja date vacío.
+Si el pantallazo es un resumen diario sin sesiones (ej. anillos de actividad), devuelve UNA actividad "Actividad diaria"
+con los minutos de ejercicio y las calorías activas del día.
+Si muestra varios días, devuelve una entrada por día/sesión. Si no hay datos de actividad, devuelve activities vacío y explícalo en notes.
+No inventes valores: si un dato no aparece, usa 0. Responde en español.`;
+
+const ACTIVITY_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    activities: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          date: { type: "STRING" }, activity: { type: "STRING" }, minutes: num,
+          kcal_active: num, kcal_total: num, steps: num, distance_km: num,
+        },
+        required: ["date", "activity", "minutes", "kcal_active", "kcal_total", "steps", "distance_km"],
+      },
+    },
+    notes: { type: "STRING" },
+  },
+  required: ["activities"],
+};
+
 // Verifica que quien llama sea un usuario con sesión iniciada (no basta la clave pública).
 async function getUserId(req: Request): Promise<string | null> {
   const auth = req.headers.get("Authorization") ?? "";
@@ -71,16 +103,24 @@ Deno.serve(async (req) => {
   if (!(await getUserId(req))) return json({ error: "Debes iniciar sesión" }, 401);
   if (!GEMINI_API_KEY) return json({ error: "Falta configurar el secreto GEMINI_API_KEY en Supabase" }, 500);
 
-  let body: { image?: string; mimeType?: string; comment?: string; meal?: string };
+  let body: { image?: string; mimeType?: string; comment?: string; meal?: string; mode?: string; today?: string; viewing?: string };
   try { body = await req.json(); } catch { return json({ error: "JSON inválido" }, 400); }
 
-  const { image, mimeType = "image/jpeg", comment = "", meal = "" } = body;
-  if (!image && !comment.trim()) return json({ error: "Envía una foto o un comentario" }, 400);
+  const { image, mimeType = "image/jpeg", comment = "", meal = "", mode = "food", today = "", viewing = "" } = body;
+  const isActivity = mode === "activity";
+  if (isActivity ? !image : !image && !comment.trim()) return json({ error: isActivity ? "Envía un pantallazo" : "Envía una foto o un comentario" }, 400);
   if (image && image.length > 4_000_000) return json({ error: "Imagen demasiado grande" }, 413);
 
-  const parts: unknown[] = [{ text: PROMPT }];
-  if (meal) parts.push({ text: `Comida del día: ${meal}.` });
-  if (comment.trim()) parts.push({ text: `Comentario del usuario: """${comment.slice(0, 1000)}"""` });
+  const parts: unknown[] = [];
+  if (isActivity) {
+    parts.push({ text: ACTIVITY_PROMPT });
+    if (/^\d{4}-\d{2}-\d{2}$/.test(today)) parts.push({ text: `Fecha de hoy: ${today}.` });
+    if (/^\d{4}-\d{2}-\d{2}$/.test(viewing)) parts.push({ text: `El usuario está registrando el día ${viewing} (úsalo solo si no hay fecha visible).` });
+  } else {
+    parts.push({ text: PROMPT });
+    if (meal) parts.push({ text: `Comida del día: ${meal}.` });
+    if (comment.trim()) parts.push({ text: `Comentario del usuario: """${comment.slice(0, 1000)}"""` });
+  }
   if (image) parts.push({ inline_data: { mime_type: mimeType, data: image } });
 
   const resp = await fetch(
@@ -90,7 +130,7 @@ Deno.serve(async (req) => {
       headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
       body: JSON.stringify({
         contents: [{ role: "user", parts }],
-        generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: SCHEMA },
+        generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: isActivity ? ACTIVITY_SCHEMA : SCHEMA },
       }),
     },
   );
@@ -108,6 +148,13 @@ Deno.serve(async (req) => {
   const text = data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "";
   try {
     const result = JSON.parse(text);
+    if (isActivity) {
+      // Descarta fechas futuras o mal formadas
+      for (const a of result.activities ?? []) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(a.date ?? "") || (today && a.date > today)) a.date = "";
+      }
+      return json(result);
+    }
     // Recalcula totales desde los items para que siempre cuadren
     const items = Array.isArray(result.items) ? result.items : [];
     const sum = (k: string) => Math.round(items.reduce((a: number, it: Record<string, number>) => a + (Number(it[k]) || 0), 0) * 10) / 10;
