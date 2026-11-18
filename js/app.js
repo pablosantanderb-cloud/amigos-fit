@@ -62,6 +62,22 @@ function workoutIcon(name = '') {
   return `<span class="wk-ic" style="--wc:${w?.color || '#64748b'}">${w?.icon || guess}</span>`;
 }
 
+const P_creatine = () => !!profile?.track_creatine;
+
+// Pop-up simple reutilizable
+function showModal({ icon = '', title, text = '', ok = 'Aceptar', cancel = null, onOk = null }) {
+  const el = document.createElement('div');
+  el.className = 'tut';
+  el.innerHTML = `<div class="tut-card" role="dialog" aria-modal="true">
+    ${icon ? `<div class="tut-icon">${icon}</div>` : ''}<h2>${title}</h2>${text ? `<p style="min-height:0">${text}</p>` : ''}
+    <div class="tut-nav" style="margin-top:14px;${cancel ? '' : 'grid-template-columns:1fr'}">
+      ${cancel ? `<button class="btn ghost" data-m="no">${cancel}</button>` : ''}<button class="btn" data-m="ok">${ok}</button></div></div>`;
+  document.body.appendChild(el);
+  const close = () => el.remove();
+  el.querySelector('[data-m=ok]').onclick = () => { close(); if (onOk) onOk(); };
+  const no = el.querySelector('[data-m=no]'); if (no) no.onclick = close;
+}
+
 // Llama a la función de IA y devuelve el JSON (o lanza un error legible)
 async function callAI(body) {
   const t0 = Date.now();
@@ -513,6 +529,7 @@ async function viewProfile() {
       <div><label>kcal del reloj que se consideran</label>
         <select name="exercise_credit_pct">${[[50, '50%'], [75, '75% (recom.)'], [100, '100%']].map(([v, l]) => `<option value="${v}" ${(p.exercise_credit_pct ?? C.DEFAULT_CREDIT) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     </div>
+    <label class="check" style="margin-top:12px"><input type="checkbox" name="track_creatine" ${p.track_creatine ? 'checked' : ''}> 💊 Tomo creatina: mostrar check diario y recordatorio desde las 17:00</label>
     ${p.calibration_kcal ? `<p class="small">⚖️ Ajuste por calibración con tu balanza: <b>${p.calibration_kcal > 0 ? '+' : ''}${fmt(p.calibration_kcal)} kcal/día</b> en tu gasto base. <a href="#" id="resetCal">Quitar ajuste</a></p>` : ''}
     <div id="calc" class="calc-box"></div>
     <button class="btn block" style="margin-top:14px">${first ? 'Calcular y comenzar' : 'Guardar cambios'}</button>
@@ -587,6 +604,7 @@ async function viewProfile() {
       activity_level: f.activity_level, goal: f.goal, rate_kg_week: f.rate_kg_week,
       target_weight_kg: num(f.target_weight_kg) || null,
       weekly_activity_goal_min: parseInt(f.weekly_activity_goal_min, 10) || 0,
+      track_creatine: f.track_creatine === 'on',
       exercise_credit_pct: f.exercise_credit_pct, activity_basis: 'v3', target_mode: f.target_mode || 'dynamic',
       train_mod_sessions: f.train_mod_sessions, train_mod_minutes: f.train_mod_minutes, train_int_sessions: f.train_int_sessions, train_int_minutes: f.train_int_minutes,
       start_weight_kg: p.start_weight_kg ?? f.weight_kg,
@@ -672,6 +690,8 @@ async function viewToday() {
     sb.from('activity_logs').select('*').eq('log_date', d).order('created_at'),
     sb.from('daily_energy').select('*').eq('log_date', d).maybeSingle(),
   ]);
+  const creatine = P_creatine() ? await sb.from('supplement_logs').select('id').eq('log_date', d).eq('item', 'creatina').maybeSingle() : { data: null };
+  const creatineTaken = !!creatine.data;
   if (food.error) throw food.error;
   const logs = food.data || [];
   const tot = C.sumLogs(logs);
@@ -726,6 +746,12 @@ async function viewToday() {
       return `<div class="coach ${rv.tone}"><b>📋 Cómo te fue este día</b>${spent.source === 'reloj' ? '' : ' <span class="small muted">(estimado; ingresa el gasto del reloj para el dato real)</span>'}<ul>${rv.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
     })()}
   </div>
+
+  ${P_creatine() ? `<div class="card creat ${creatineTaken ? 'done' : ''}">
+    <button type="button" id="creatBtn" class="creat-btn" aria-pressed="${creatineTaken}">
+      <span class="creat-box">${creatineTaken ? '✓' : ''}</span>
+      <span><b>💊 Creatina</b><small>${creatineTaken ? 'Tomada ✅' : 'Toca para marcarla como tomada'}</small></span>
+    </button></div>` : ''}
 
   <div class="card">
     <div class="row between"><h2 style="margin:0">🍽️ Comidas</h2><a class="btn sm" href="#/registrar">📷 Registrar</a></div>
@@ -845,6 +871,26 @@ async function viewToday() {
   }));
 
   reveal('#wToggle', '#wf', () => $('#wf').weight_kg.focus());
+
+  // --- Creatina: check diario
+  const setCreatine = async (taken) => {
+    const { error } = taken
+      ? await sb.from('supplement_logs').upsert({ user_id: uid, log_date: d, item: 'creatina' }, { onConflict: 'user_id,log_date,item' })
+      : await sb.from('supplement_logs').delete().eq('log_date', d).eq('item', 'creatina');
+    if (error) return toast(error.message, true);
+    toast(taken ? 'Creatina registrada 💊' : 'Marcada como no tomada');
+    route();
+  };
+  if ($('#creatBtn')) $('#creatBtn').onclick = () => setCreatine(!creatineTaken);
+  // Recordatorio: hoy, desde las 17:00, si no está tomada (una vez por sesión y día)
+  const remindKey = `af_creat_remind_${d}`;
+  if (P_creatine() && isToday && !creatineTaken && new Date().getHours() >= 17 && !sessionStorage.getItem(remindKey) && !tutorialOpen) {
+    sessionStorage.setItem(remindKey, '1');
+    showModal({
+      icon: '💊', title: '¿Tomaste tu creatina?', text: 'Aún no la marcas como tomada hoy. La constancia diaria es lo que la hace efectiva.',
+      ok: '✅ Ya la tomé', cancel: 'Recordar después', onOk: () => setCreatine(true),
+    });
+  }
 
   $('#wf').onsubmit = async (ev) => {
     ev.preventDefault();

@@ -306,3 +306,11 @@ table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
 .wk-ic { width: 34px !important; height: 34px !important; font-size: 1.05rem !important; }
 .wk-img { width: 34px; height: 34px; flex: none; border-radius: 50%; object-fit: cover; }
 .wk-sel .wk-ic, .wk-opt .wk-ic { flex: none; }
+
+.creat { padding: 10px 12px; }
+.creat-btn { width: 100%; display: flex; align-items: center; gap: 12px; background: none; border: 0; color: var(--text); font: inherit; text-align: left; cursor: pointer; padding: 4px; }
+.creat-btn span:last-child { display: flex; flex-direction: column; }
+.creat-btn small { color: var(--muted); font-size: .8rem; }
+.creat-box { width: 30px; height: 30px; flex: none; border-radius: 9px; border: 2px solid var(--line); display: inline-flex; align-items: center; justify-content: center; font-weight: 800; color: #fff; font-size: 1.1rem; }
+.creat.done { border-color: var(--accent); background: var(--accent-soft); }
+.creat.done .creat-box { background: var(--accent); border-color: var(--accent); }
