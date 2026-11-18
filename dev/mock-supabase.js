@@ -14,7 +14,7 @@ for (let i = 0; i < 20; i++) {
   db.food_logs.push({ id: id++, user_id: uid, log_date: day(-i), meal: 'desayuno', description: 'Avena con plátano', comment: 'con leche descremada', kcal: 450, protein_g: 20, carbs_g: 70, fat_g: 9, created_at: '' });
   if (i % 3 === 0) db.weight_logs.push({ id: id++, user_id: uid, log_date: day(-i), weight_kg: 88 + i*0.1 });
   if (i % 2 === 0) db.activity_logs.push({ id: id++, user_id: uid, log_date: day(-i), activity: 'Caminar', minutes: 40, kcal_burned: 250 });
-  if (i % 3 === 1) db.daily_energy.push({ id: id++, user_id: uid, log_date: day(-i), total_kcal: 2700, active_kcal: 800, resting_kcal: 1900 });
+  if (i >= 1 && i <= 9) db.daily_energy.push({ id: id++, user_id: uid, log_date: day(-i), total_kcal: 2700, active_kcal: 800, resting_kcal: 1900 });
 }
 db.weight_logs.sort((a,b)=>a.log_date.localeCompare(b.log_date));
 class Q {
@@ -23,6 +23,7 @@ class Q {
   eq(k, v) { this.f.push((r) => String(r[k]) === String(v)); return this; }
   gte(k, v) { this.f.push((r) => r[k] >= v); return this; }
   lte(k, v) { this.f.push((r) => r[k] <= v); return this; }
+  lt(k, v) { this.f.push((r) => r[k] < v); return this; }
   order(k, o = {}) { this.ord = [k, o.ascending !== false]; return this; }
   limit(n) { this.lim = n; return this; }
   maybeSingle() { this.one = true; return this; }

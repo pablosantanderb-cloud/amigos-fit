@@ -113,6 +113,11 @@ alter table public.profiles add column if not exists training_sessions_week int 
 alter table public.profiles add column if not exists training_minutes int default 60;
 alter table public.profiles add column if not exists training_intensity text default 'moderada';
 
+-- ---------- Gasto aprendido del reloj ----------
+alter table public.profiles add column if not exists learned_tdee int;
+alter table public.profiles add column if not exists learned_days int default 0;
+alter table public.profiles add column if not exists learned_at date;
+
 -- ---------- GRUPOS ----------
 create table if not exists public.groups (
   id          uuid primary key default gen_random_uuid(),

@@ -85,9 +85,36 @@ export function baseNoTraining(p) {
   return Math.round(bmr(p) * f + (Number(p.calibration_kcal) || 0));
 }
 
-/** Gasto PROMEDIO diario = vida diaria + entrenamientos habituales. Es la base de la meta fija. */
-export function tdee(p) {
+/** Gasto promedio según la FÓRMULA (vida diaria + entrenos habituales), sin aprendizaje */
+export function formulaTdee(p) {
   return baseNoTraining(p) + avgTrainingKcal(p);
+}
+
+export const LEARN_MIN_DAYS = 7;   // días con gasto del reloj para empezar a aprender
+export const LEARN_FULL_DAYS = 14; // desde aquí la meta usa 100% lo aprendido
+
+/** Peso (0–1) que tiene el gasto aprendido del reloj en la meta */
+export function learnedWeight(p) {
+  const n = Number(p.learned_days) || 0;
+  if (!(Number(p.learned_tdee) > 0) || n < LEARN_MIN_DAYS) return 0;
+  return Math.min(1, n / LEARN_FULL_DAYS);
+}
+
+/**
+ * Gasto PROMEDIO diario, base de la meta fija.
+ * Parte con la fórmula y, a medida que registras el gasto total del reloj, se mezcla con tu promedio real:
+ * 7 días → 50% reloj, 14 días o más → 100% reloj (últimos 28 días).
+ */
+export function tdee(p) {
+  const w = learnedWeight(p);
+  return Math.round(formulaTdee(p) * (1 - w) + (Number(p.learned_tdee) || 0) * w);
+}
+
+/** Aprende el gasto promedio real desde los cierres del reloj (ya ajustados por el % de confianza) */
+export function learnFromWatch(p, watchDays) {
+  const vals = watchDays.filter((w) => Number(w.total_kcal) > 0).map((w) => dayExpenditure(p, 0, w).kcal);
+  if (!vals.length) return { days: 0, avg: null };
+  return { days: vals.length, avg: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) };
 }
 
 const creditPct = (p) => (p.exercise_credit_pct ?? DEFAULT_CREDIT) / 100;

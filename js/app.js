@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=6';
+import * as C from './calc.js?v=7';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -40,6 +40,16 @@ function readBirth(form) {
   const last = new Date(y, m, 0).getDate();
   const z = (n) => String(n).padStart(2, '0');
   return `${y}-${z(m)}-${z(Math.min(d, last))}`;
+}
+
+// Explica de dónde sale el gasto promedio (fórmula y/o lo aprendido del reloj)
+function learnTxt(p) {
+  const formula = `fórmula ${fmt(C.formulaTdee(p))} (sin ejercicio ${fmt(C.baseNoTraining(p))} + entrenos ${fmt(C.avgTrainingKcal(p))}/día)`;
+  const n = Number(p.learned_days) || 0;
+  const w = C.learnedWeight(p);
+  if (w >= 1) return `🧠 Gasto promedio aprendido de tu reloj: ${fmt(p.learned_tdee)} kcal/día (${n} días registrados en las últimas 4 semanas). Se actualiza solo cada día.`;
+  if (w > 0) return `🧠 Gasto promedio = ${Math.round(w * 100)}% lo aprendido de tu reloj (${fmt(p.learned_tdee)}, ${n} días) + ${Math.round((1 - w) * 100)}% ${formula}. Con ${C.LEARN_FULL_DAYS} días usará solo tu reloj.`;
+  return `Gasto promedio por ${formula}. Ingresa el gasto total de tu reloj cada día: con ${C.LEARN_MIN_DAYS} días la meta empieza a ajustarse sola (llevas ${n}).`;
 }
 
 // Llama a la función de IA y devuelve el JSON (o lanza un error legible)
@@ -171,13 +181,34 @@ async function loadProfile() {
   const { data, error } = await sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
   if (error) throw error;
   profile = data;
-  // Si cumplió años desde el último cálculo, recalcula las metas en silencio
-  const age = C.ageFromBirth(profile?.birth_date);
-  if (age && profile.kcal_target && age !== profile.age) {
-    const t = C.targets({ ...profile, age });
-    const upd = { age, bmr: t.bmr, tdee: t.tdee, kcal_target: t.kcal_target, protein_g: t.protein_g, carbs_g: t.carbs_g, fat_g: t.fat_g };
+  if (!profile?.kcal_target) return profile;
+  const upd = {};
+  // Si cumplió años desde el último cálculo, recalcula
+  const age = C.ageFromBirth(profile.birth_date);
+  if (age && age !== profile.age) upd.age = age;
+  // Aprende el gasto promedio real de los cierres del reloj (últimos 28 días), una vez al día
+  if (profile.learned_at !== C.isoDate()) {
+    const { data: wd } = await sb.from('daily_energy').select('total_kcal,active_kcal,resting_kcal')
+      .gte('log_date', C.addDays(C.isoDate(), -28)).lt('log_date', C.isoDate());
+    const L = C.learnFromWatch({ ...profile, ...upd }, wd || []);
+    upd.learned_at = C.isoDate();
+    if (L.days !== (profile.learned_days || 0) || (L.avg && L.avg !== profile.learned_tdee)) {
+      upd.learned_days = L.days;
+      if (L.avg) upd.learned_tdee = L.avg;
+    }
+  }
+  if (Object.keys(upd).length) {
+    const next = { ...profile, ...upd };
+    const t = C.targets(next);
+    Object.assign(upd, { bmr: t.bmr, tdee: t.tdee, kcal_target: t.kcal_target, protein_g: t.protein_g, carbs_g: t.carbs_g, fat_g: t.fat_g });
+    const before = profile.kcal_target;
     const { error: e2 } = await sb.from('profiles').update(upd).eq('id', session.user.id);
-    if (!e2) Object.assign(profile, upd);
+    if (!e2) {
+      Object.assign(profile, upd);
+      if (Math.abs(t.kcal_target - before) >= 20 && C.learnedWeight(profile) > 0) {
+        setTimeout(() => toast(`🧠 Tu meta se ajustó a ${fmt(t.kcal_target)} kcal según tus últimos ${profile.learned_days} días del reloj`), 600);
+      }
+    }
   }
   return profile;
 }
@@ -361,7 +392,8 @@ async function viewProfile() {
     const f = Object.fromEntries(new FormData(form));
     f.birth_date = readBirth(form);
     return { ...f, training_sessions_week: +f.training_sessions_week, training_minutes: +f.training_minutes, age: C.ageFromBirth(f.birth_date), weight_kg: num(f.weight_kg), height_cm: num(f.height_cm), rate_kg_week: C.usesRate(f.goal) ? +f.rate_kg_week : 0,
-      exercise_credit_pct: +f.exercise_credit_pct, calibration_kcal: p.calibration_kcal || 0 };
+      exercise_credit_pct: +f.exercise_credit_pct, calibration_kcal: p.calibration_kcal || 0,
+      learned_tdee: p.learned_tdee, learned_days: p.learned_days || 0 };
   };
   const valid = (f) => f.sex && f.age >= 12 && f.age <= 100 && f.weight_kg >= 30 && f.weight_kg <= 300 && f.height_cm >= 100 && f.height_cm <= 250;
   const update = () => {
@@ -378,7 +410,7 @@ async function viewProfile() {
         <div><div class="v">${fmt(t.tdee)}</div><div class="small muted">Gasto promedio</div></div>
         <div><div class="v" style="color:var(--accent)">${fmt(t.kcal_target)}</div><div class="small muted">Meta diaria</div></div>
       </div>
-      <p class="small" style="text-align:center">${adj}<br><span class="muted">Gasto promedio = vida diaria ${fmt(C.baseNoTraining(f))} + entrenos ${fmt(C.avgTrainingKcal(f))} kcal/día (promedio semanal)</span></p>
+      <p class="small" style="text-align:center">${adj}<br><span class="muted">${learnTxt(f)}</span></p>
       <div class="grid3">
         <div><div class="v" style="color:var(--prot)">${t.protein_g} g</div><div class="small muted">Proteínas</div></div>
         <div><div class="v" style="color:var(--carb)">${t.carbs_g} g</div><div class="small muted">Carbohidratos</div></div>
@@ -518,7 +550,7 @@ async function viewToday() {
       </table>
       ${spent.source !== 'reloj' ? `<span class="small muted">${actKcal ? '' : 'Si entrenaste este día, regístralo abajo: tu gasto sube y el déficit aumenta. '}Para un balance más exacto, ingresa abajo el gasto total de tu reloj.</span>` : ''}
     </div>
-    ${C.avgTrainingKcal(P) > 0 ? `<p class="small muted" style="margin-top:8px">ℹ️ Tu meta de ${fmt(P.kcal_target)} kcal está calculada sobre tu gasto promedio de ${fmt(C.tdee(P))} (sin ejercicio ${fmt(C.baseNoTraining(P))} + ${fmt(C.avgTrainingKcal(P))} de tus entrenos habituales repartidos en la semana).</p>` : ''}` : ''}
+    <p class="small muted" style="margin-top:8px">ℹ️ Tu meta de ${fmt(P.kcal_target)} kcal = gasto promedio ${fmt(C.tdee(P))} ${P.kcal_target < C.tdee(P) ? `− ${fmt(C.tdee(P) - P.kcal_target)}` : P.kcal_target > C.tdee(P) ? `+ ${fmt(P.kcal_target - C.tdee(P))}` : ''}. ${learnTxt(P)}</p>` : ''}
     ${macroBar('🥩 Proteínas', tot.protein_g, P.protein_g, COLORS.prot)}
     ${macroBar('🍞 Carbohidratos', tot.carbs_g, P.carbs_g, COLORS.carb)}
     ${macroBar('🥑 Grasas', tot.fat_g, P.fat_g, COLORS.fat)}
