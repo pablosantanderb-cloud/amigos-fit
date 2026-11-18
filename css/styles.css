@@ -208,3 +208,9 @@ table.bal { width: 100%; border-collapse: collapse; font-size: .85rem; margin-to
 table.bal td { padding: 3px 0; vertical-align: top; }
 table.bal td:last-child { text-align: right; white-space: nowrap; padding-left: 10px; font-variant-numeric: tabular-nums; }
 table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
+
+.coach { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: var(--accent-soft); font-size: .9rem; }
+.coach.warn { background: #fef3c7; color: #78350f; }
+@media (prefers-color-scheme: dark) { .coach.warn { background: #3a2a0a; color: #fde68a; } }
+.coach ul { margin: 6px 0 0; padding-left: 18px; }
+.coach li { margin: 4px 0; }

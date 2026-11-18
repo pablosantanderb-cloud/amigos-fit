@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=7';
+import * as C from './calc.js?v=9';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -554,6 +554,10 @@ async function viewToday() {
     ${macroBar('🥩 Proteínas', tot.protein_g, P.protein_g, COLORS.prot)}
     ${macroBar('🍞 Carbohidratos', tot.carbs_g, P.carbs_g, COLORS.carb)}
     ${macroBar('🥑 Grasas', tot.fat_g, P.fat_g, COLORS.fat)}
+    ${d === C.isoDate() ? (() => {
+      const cz = C.macroCoach(P, tot, new Date().getHours(), logs.map((l) => mealKey(l.meal)));
+      return `<div class="coach ${cz.tone}"><b>💡 Para lo que queda del día</b><ul>${cz.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+    })() : ''}
   </div>
 
   <div class="card">
