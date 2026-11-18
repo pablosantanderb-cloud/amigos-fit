@@ -1441,6 +1441,16 @@ function renderDailyCompare(rows, error, from, to, members) {
         }).join('')}</div>`).join('')}
     </div>
     <p class="small muted"><span class="dot dg"></span> en objetivo · <span class="dot dy"></span> bajo · <span class="dot dr"></span> sobre · — sin registro · borde punteado = hoy (en curso)</p>
+    <details class="small cal-info"><summary>ℹ️ ¿Cómo se define el color?</summary>
+      <p class="muted">El % es lo comido ese día dividido por la meta de esa persona (100% = justo su meta).</p>
+      <table class="bal">
+        <tr><td><b>Calorías</b></td><td><span class="dot dy"></span> menos de 90% · <span class="dot dg"></span> 90–110% · <span class="dot dr"></span> más de 110%</td></tr>
+        <tr><td><b>Proteína</b></td><td><span class="dot dy"></span> menos de 90% · <span class="dot dg"></span> 90% o más (pasarse no es malo)</td></tr>
+        <tr><td><b>Carbos</b></td><td><span class="dot dy"></span> menos de 60% · <span class="dot dg"></span> 60–110% · <span class="dot dr"></span> más de 110%</td></tr>
+        <tr><td><b>Grasas</b></td><td><span class="dot dy"></span> menos de 60% · <span class="dot dg"></span> 60–110% · <span class="dot dr"></span> más de 110%</td></tr>
+      </table>
+      <p class="muted">La meta de calorías de cada día considera el modo de cada uno: en modo dinámico sube los días con entreno; en modo fijo es igual todos los días.</p>
+    </details>
     <h3 style="margin-top:14px">📈 ${MAC[mk][0]} diaria – esta semana</h3>
     <div class="chips" id="dcPeople"><button type="button" class="chip-btn ${!state.dcOnly ? 'on' : ''}" data-dcp="">Todos</button>${Object.entries(byUser).map(([uid, u]) => `<button type="button" class="chip-btn ${state.dcOnly === uid ? 'on' : ''}" data-dcp="${uid}">${esc(u.name)}</button>`).join('')}</div>
     <div class="chart-box"><canvas id="dcChart"></canvas></div>
