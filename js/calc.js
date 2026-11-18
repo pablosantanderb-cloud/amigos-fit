@@ -1,12 +1,16 @@
 // Cálculos nutricionales puros (sin dependencias, testeables con Node).
 
+// Nivel de actividad de la VIDA DIARIA, SIN contar entrenamientos.
+// Los entrenamientos se registran aparte y suman a la meta del día (ver exerciseCredit),
+// así nunca se cuentan dos veces.
 export const ACTIVITY_LEVELS = {
-  sedentario: { factor: 1.2,   label: 'Sedentario (poco o nada de ejercicio)' },
-  ligero:     { factor: 1.375, label: 'Ligero (ejercicio 1–3 días/semana)' },
-  moderado:   { factor: 1.55,  label: 'Moderado (ejercicio 3–5 días/semana)' },
-  activo:     { factor: 1.725, label: 'Activo (ejercicio 6–7 días/semana)' },
-  muy_activo: { factor: 1.9,   label: 'Muy activo (trabajo físico o doble sesión)' },
+  sedentario: { factor: 1.2,  label: 'Sedentaria: oficina o casa, camino poco (menos de 5.000 pasos)' },
+  ligero:     { factor: 1.35, label: 'Ligera: de pie o caminando parte del día (5.000–8.000 pasos)' },
+  moderado:   { factor: 1.5,  label: 'Activa: camino harto o trabajo en movimiento (8.000–12.000 pasos)' },
+  activo:     { factor: 1.65, label: 'Muy activa: trabajo físico pesado (más de 12.000 pasos)' },
 };
+
+export const DEFAULT_CREDIT = 75; // % de las kcal de ejercicio del reloj que se suman (los relojes sobreestiman)
 
 export const GOALS = {
   lose:      'Bajar de peso',
@@ -51,10 +55,63 @@ export function bmr({ sex, weight_kg, height_cm, age }) {
   return Math.round(sex === 'M' ? base + 5 : base - 161);
 }
 
-/** Gasto energético total diario */
+/** Gasto base diario SIN entrenamientos (+ ajuste personal de calibración) */
 export function tdee(p) {
   const f = ACTIVITY_LEVELS[p.activity_level]?.factor ?? 1.2;
-  return Math.round(bmr(p) * f);
+  return Math.round(bmr(p) * f + (Number(p.calibration_kcal) || 0));
+}
+
+const creditPct = (p) => (p.exercise_credit_pct ?? DEFAULT_CREDIT) / 100;
+
+/** kcal de ejercicio que se suman a la meta del día */
+export function exerciseCredit(p, exerciseKcal) {
+  return Math.round((Number(exerciseKcal) || 0) * creditPct(p));
+}
+
+/** Meta de calorías del día = meta base + crédito por ejercicio */
+export function dayTarget(p, exerciseKcal) {
+  return (p.kcal_target || 0) + exerciseCredit(p, exerciseKcal);
+}
+
+/**
+ * Gasto del día.
+ * - Con cierre del reloj: reposo + activas × crédito (si solo hay total: TMB + (total − TMB) × crédito).
+ * - Sin reloj: gasto base estimado + crédito por ejercicio registrado.
+ * Nunca se suman ambos, así no hay doble conteo.
+ */
+export function dayExpenditure(p, exerciseKcal, watch) {
+  if (watch && Number(watch.total_kcal) > 0) {
+    const c = creditPct(p);
+    const total = Number(watch.total_kcal);
+    const rest = Number(watch.resting_kcal) || 0;
+    const act = Number(watch.active_kcal) || 0;
+    const kcal = rest && act ? rest + act * c : bmr(p) + Math.max(0, total - bmr(p)) * c;
+    return { kcal: Math.round(Math.min(total, kcal)), source: 'reloj' };
+  }
+  return { kcal: tdee(p) + exerciseCredit(p, exerciseKcal), source: 'estimado' };
+}
+
+/**
+ * Calibración con la balanza: compara el gasto que la app estimó con el gasto real que se deduce
+ * de lo que comiste y de cómo cambió tu peso.
+ * days: [{ intake, expenditure }] solo días con comidas registradas; weights: [{ date: 'YYYY-MM-DD', kg }]
+ */
+export function calibrate(days, weights, periodDays) {
+  if (days.length < Math.max(14, periodDays * 0.75)) return { ok: false, reason: `Necesitas registrar comidas en al menos ${Math.max(14, Math.ceil(periodDays * 0.75))} de los últimos ${periodDays} días (llevas ${days.length}).` };
+  if (weights.length < 3) return { ok: false, reason: `Necesitas al menos 3 pesajes en el período (llevas ${weights.length}).` };
+  const t0 = new Date(weights[0].date).getTime();
+  const xs = weights.map((w) => (new Date(w.date).getTime() - t0) / 86400000);
+  if (xs[xs.length - 1] < 14) return { ok: false, reason: 'Los pesajes deben abarcar al menos 2 semanas.' };
+  const ys = weights.map((w) => Number(w.kg));
+  const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+  const my = ys.reduce((a, b) => a + b, 0) / ys.length;
+  const slope = xs.reduce((a, x, i) => a + (x - mx) * (ys[i] - my), 0) / xs.reduce((a, x) => a + (x - mx) ** 2, 0); // kg/día
+  const intake = days.reduce((a, d) => a + d.intake, 0) / days.length;
+  const est = days.reduce((a, d) => a + d.expenditure, 0) / days.length;
+  const real = intake - slope * KCAL_PER_KG;
+  const predictedKgWeek = ((intake - est) * 7) / KCAL_PER_KG;
+  return { ok: true, intake: Math.round(intake), est: Math.round(est), real: Math.round(real), diff: Math.round(real - est),
+    realKgWeek: Math.round(slope * 7 * 100) / 100, predictedKgWeek: Math.round(predictedKgWeek * 100) / 100 };
 }
 
 /**

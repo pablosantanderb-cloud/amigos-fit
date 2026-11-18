@@ -57,15 +57,22 @@ const SCHEMA = {
 // ---- Modo "activity": pantallazo de la app del reloj / smart band
 const ACTIVITY_PROMPT = `Eres un asistente que lee pantallazos de apps de relojes y bandas deportivas
 (Apple Fitness/Salud, Garmin Connect, Huawei Health, Zepp/Amazfit, Mi Fitness, Samsung Health, Fitbit, Polar, Strava, etc.).
-Extrae cada sesión de ejercicio visible: tipo de actividad en español (ej. "Caminata", "Carrera", "Fuerza", "Bicicleta"),
-duración en minutos, calorías ACTIVAS (de movimiento/ejercicio; si solo aparecen calorías totales, úsalas en kcal_total),
-pasos y distancia en km si aparecen, y la fecha de esa sesión en formato YYYY-MM-DD.
-Reglas para la fecha: usa la fecha visible en la imagen; textos como "Hoy", "Ayer", "lun", "12 nov" interprétalos
-respecto de la fecha de hoy indicada. Nunca devuelvas una fecha futura. Si no hay fecha visible, deja date vacío.
-Si el pantallazo es un resumen diario sin sesiones (ej. anillos de actividad), devuelve UNA actividad "Actividad diaria"
-con los minutos de ejercicio y las calorías activas del día.
-Si muestra varios días, devuelve una entrada por día/sesión. Si no hay datos de actividad, devuelve activities vacío y explícalo en notes.
-No inventes valores: si un dato no aparece, usa 0. Responde en español.`;
+Devuelve DOS cosas por separado:
+
+1) "activities": SOLO entrenamientos o sesiones de ejercicio registradas (ej. "Caminata", "Carrera", "Fuerza",
+   "Bicicleta", "Fútbol"), en español, con duración en minutos, calorías ACTIVAS de esa sesión (si solo aparecen
+   totales de la sesión, úsalas en kcal_total), pasos y distancia en km si aparecen.
+   NO incluyas aquí el resumen del día (anillos, "Moverse", calorías activas del día, pasos del día):
+   eso va en day_totals, porque el movimiento cotidiano ya está considerado en el gasto base de la persona.
+
+2) "day_totals": gasto energético del DÍA completo si aparece: total_kcal (energía total = en reposo + activa),
+   active_kcal (energía activa del día, ej. anillo "Moverse" de Apple) y resting_kcal (energía en reposo / basal).
+   Si solo ves activa y en reposo, total_kcal es su suma. Si solo ves la activa del día, deja total_kcal y resting_kcal en 0.
+
+Fechas en formato YYYY-MM-DD: usa la fecha visible; "Hoy", "Ayer", "lun", "12 nov" interprétalos respecto de la fecha
+de hoy indicada. Nunca devuelvas una fecha futura. Si no hay fecha visible, deja date vacío.
+Si muestra varios días, devuelve una entrada por día/sesión. No inventes valores: si un dato no aparece, usa 0.
+Si no hay datos de actividad, devuelve listas vacías y explícalo en notes. Responde en español.`;
 
 const ACTIVITY_SCHEMA = {
   type: "OBJECT",
@@ -81,9 +88,17 @@ const ACTIVITY_SCHEMA = {
         required: ["date", "activity", "minutes", "kcal_active", "kcal_total", "steps", "distance_km"],
       },
     },
+    day_totals: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: { date: { type: "STRING" }, total_kcal: num, active_kcal: num, resting_kcal: num },
+        required: ["date", "total_kcal", "active_kcal", "resting_kcal"],
+      },
+    },
     notes: { type: "STRING" },
   },
-  required: ["activities"],
+  required: ["activities", "day_totals"],
 };
 
 // Verifica que quien llama sea un usuario con sesión iniciada (no basta la clave pública).
@@ -150,7 +165,7 @@ Deno.serve(async (req) => {
     const result = JSON.parse(text);
     if (isActivity) {
       // Descarta fechas futuras o mal formadas
-      for (const a of result.activities ?? []) {
+      for (const a of [...(result.activities ?? []), ...(result.day_totals ?? [])]) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(a.date ?? "") || (today && a.date > today)) a.date = "";
       }
       return json(result);

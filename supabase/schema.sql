@@ -86,6 +86,28 @@ create table if not exists public.activity_logs (
 );
 create index if not exists activity_logs_user_date on public.activity_logs (user_id, log_date);
 
+-- ---------- Modelo de energía: gasto base sin entrenos + crédito de ejercicio + cierre del reloj ----------
+alter table public.profiles add column if not exists exercise_credit_pct int default 75;
+alter table public.profiles add column if not exists calibration_kcal int default 0;
+alter table public.profiles add column if not exists activity_basis text;   -- 'sin_ejercicio' = eligió el nivel con la definición nueva
+
+create table if not exists public.daily_energy (
+  id           bigint generated always as identity primary key,
+  user_id      uuid not null default auth.uid() references auth.users on delete cascade,
+  log_date     date not null,
+  total_kcal   int not null check (total_kcal between 500 and 10000),
+  active_kcal  int,
+  resting_kcal int,
+  source       text,
+  created_at   timestamptz default now(),
+  unique (user_id, log_date)
+);
+alter table public.daily_energy enable row level security;
+drop policy if exists "solo dueño" on public.daily_energy;
+create policy "solo dueño" on public.daily_energy for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+grant select, insert, update, delete on public.daily_energy to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+
 -- ---------- GRUPOS ----------
 create table if not exists public.groups (
   id          uuid primary key default gen_random_uuid(),
@@ -180,7 +202,7 @@ end $$;
 
 -- ---------- RPC: ranking del grupo ----------
 -- Puntaje 0-100 que premia CONSTANCIA y CUMPLIMIENTO, no solo kilos:
---   30% constancia (días con registro) · 25% calorías dentro de ±10% de la meta
+--   30% constancia (días con registro) · 25% calorías dentro de ±10% de la meta del día (base + ejercicio)
 --   20% proteína ≥ 90% de la meta · 15% minutos de actividad vs meta semanal
 --   10% tendencia del peso en la dirección de su propio objetivo
 drop function if exists public.group_leaderboard(uuid, date, date);
@@ -202,13 +224,22 @@ d as (
   where f.user_id in (select id from m) and f.log_date between p_from and p_to
   group by 1, 2
 ),
+ex as (  -- kcal de entrenamientos por día: suben la meta de ese día (crédito %)
+  select a.user_id, a.log_date, sum(coalesce(a.kcal_burned, 0)) kc
+  from activity_logs a
+  where a.user_id in (select id from m) and a.log_date between p_from and p_to
+  group by 1, 2
+),
 agg as (
   select m.id,
     count(d.log_date)::int as days_logged,
-    (count(*) filter (where m.kcal_target > 0 and d.kcal between m.kcal_target * 0.9 and m.kcal_target * 1.1))::int as kcal_ok,
+    (count(*) filter (where m.kcal_target > 0 and d.kcal between
+        (m.kcal_target + coalesce(ex.kc, 0) * coalesce(m.exercise_credit_pct, 75) / 100.0) * 0.9 and
+        (m.kcal_target + coalesce(ex.kc, 0) * coalesce(m.exercise_credit_pct, 75) / 100.0) * 1.1))::int as kcal_ok,
     (count(*) filter (where m.protein_g > 0 and d.prot >= m.protein_g * 0.9))::int as prot_ok,
     round(avg(d.kcal))::numeric as avg_kcal
   from m left join d on d.user_id = m.id
+  left join ex on ex.user_id = d.user_id and ex.log_date = d.log_date
   group by m.id
 ),
 act as (

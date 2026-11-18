@@ -3,9 +3,9 @@ const uid = 'u1';
 const today = new Date(); const iso = (d) => d.toISOString().slice(0,10);
 const day = (n) => { const d = new Date(); d.setDate(d.getDate()+n); return iso(d); };
 const db = {
-  profiles: [{ id: uid, display_name: 'Pablo', sex: 'M', age: 40, birth_date: '1986-03-10', height_cm: 178, weight_kg: 88, start_weight_kg: 90, target_weight_kg: 82,
-    activity_level: 'moderado', goal: 'lose', rate_kg_week: 0.5, weekly_activity_goal_min: 150, bmr: 1798, tdee: 2787, kcal_target: 2237, protein_g: 176, carbs_g: 240, fat_g: 62 }],
-  food_logs: [], weight_logs: [], activity_logs: [], groups: [{ id: 'g1', name: 'Los del fútbol', invite_code: 'ABC123', created_by: uid }], group_members: [],
+  profiles: [{ id: uid, display_name: 'Pablo', sex: 'M', age: 40, birth_date: '1986-03-10', activity_basis: 'sin_ejercicio', exercise_credit_pct: 75, calibration_kcal: 0, height_cm: 178, weight_kg: 88, start_weight_kg: 90, target_weight_kg: 82,
+    activity_level: 'ligero', goal: 'lose', rate_kg_week: 0.5, weekly_activity_goal_min: 150, bmr: 1798, tdee: 2787, kcal_target: 2237, protein_g: 176, carbs_g: 240, fat_g: 62 }],
+  food_logs: [], weight_logs: [], activity_logs: [], daily_energy: [], groups: [{ id: 'g1', name: 'Los del fútbol', invite_code: 'ABC123', created_by: uid }], group_members: [],
 };
 let id = 1;
 for (let i = 0; i < 20; i++) {
@@ -13,7 +13,8 @@ for (let i = 0; i < 20; i++) {
   db.food_logs.push({ id: id++, user_id: uid, log_date: day(-i), meal: 'almuerzo', description: 'Arroz con pollo', kcal: 1200 + (i*37)%500, protein_g: 80 + i, carbs_g: 120, fat_g: 35, created_at: '' });
   db.food_logs.push({ id: id++, user_id: uid, log_date: day(-i), meal: 'desayuno', description: 'Avena con plátano', comment: 'con leche descremada', kcal: 450, protein_g: 20, carbs_g: 70, fat_g: 9, created_at: '' });
   if (i % 3 === 0) db.weight_logs.push({ id: id++, user_id: uid, log_date: day(-i), weight_kg: 88 + i*0.1 });
-  if (i % 2 === 0) db.activity_logs.push({ id: id++, user_id: uid, log_date: day(-i), activity: 'Caminar', minutes: 40 });
+  if (i % 2 === 0) db.activity_logs.push({ id: id++, user_id: uid, log_date: day(-i), activity: 'Caminar', minutes: 40, kcal_burned: 250 });
+  if (i % 3 === 1) db.daily_energy.push({ id: id++, user_id: uid, log_date: day(-i), total_kcal: 2700, active_kcal: 800, resting_kcal: 1900 });
 }
 db.weight_logs.sort((a,b)=>a.log_date.localeCompare(b.log_date));
 class Q {
@@ -33,7 +34,7 @@ class Q {
     const T = db[this.t]; const m = (r) => this.f.every((f) => f(r));
     if (this.op === 'insert') { [].concat(this.row).forEach((r) => T.push({ id: id++, user_id: uid, created_at: new Date().toISOString(), ...r })); return Promise.resolve({ data: null, error: null }).then(res, rej); }
     if (this.op === 'update') { T.filter(m).forEach((r) => Object.assign(r, this.row)); return Promise.resolve({ error: null }).then(res, rej); }
-    if (this.op === 'upsert') { const e = T.find((r) => r.log_date === this.row.log_date); e ? Object.assign(e, this.row) : T.push({ id: id++, ...this.row }); return Promise.resolve({ error: null }).then(res, rej); }
+    if (this.op === 'upsert') { [].concat(this.row).forEach((row) => { const e = T.find((r) => r.log_date === row.log_date); e ? Object.assign(e, row) : T.push({ id: id++, ...row }); }); return Promise.resolve({ error: null }).then(res, rej); }
     if (this.op === 'delete') { db[this.t] = T.filter((r) => !m(r)); return Promise.resolve({ error: null }).then(res, rej); }
     let out = T.filter(m);
     if (this.ord) { const [k, asc] = this.ord; out = [...out].sort((a, b) => (asc ? 1 : -1) * String(a[k]).localeCompare(String(b[k]))); }
@@ -61,7 +62,7 @@ export function createClient() {
       if (fn === 'create_group' || fn === 'join_group') return { data: db.groups[0], error: null };
     },
     storage: { from: () => ({ createSignedUrls: async () => ({ data: [] }), upload: async () => ({ error: null }), remove: async () => ({}) }) },
-    functions: { invoke: async (_n, { body }) => (body.mode === 'activity' ? { data: { notes: 'Leí 2 sesiones.', activities: [
+    functions: { invoke: async (_n, { body }) => (body.mode === 'activity' ? { data: { notes: 'Leí 2 sesiones.', day_totals: [{ date: day(0), total_kcal: 2810, active_kcal: 760, resting_kcal: 2050 }], activities: [
       { date: day(-1), activity: 'Caminata', minutes: 42, kcal_active: 210, kcal_total: 260, steps: 5400, distance_km: 3.8 },
       { date: day(-3), activity: 'Fuerza', minutes: 50, kcal_active: 320, kcal_total: 0, steps: 0, distance_km: 0 }] }, error: null } : { data: { description: 'Porotos con riendas', confidence: 'media', notes: 'Asumí 1 plato hondo (~350 g).',
       items: [{ name: 'Porotos con riendas', quantity: '1 plato (350 g)', grams: 350, kcal: 420, protein_g: 21, carbs_g: 68, fat_g: 7 },
