@@ -27,10 +27,23 @@ function chileDate(offsetDays = 0) {
 }
 
 // Los Atajos a veces envían números como texto con coma o unidades ("1.234,5 kcal")
+// Formato chileno: "1.337" = mil trescientos treinta y siete (punto de miles), "1.337,5" = con decimales.
 function num(v: unknown): number {
   if (typeof v === "number") return v;
   const s = String(v ?? "").replace(/[^\d,.-]/g, "");
-  const norm = s.includes(",") && s.lastIndexOf(",") > s.lastIndexOf(".") ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");
+  if (!s) return NaN;
+  const hasComma = s.includes(","), hasDot = s.includes(".");
+  let norm: string;
+  if (hasComma && hasDot) {
+    // el último separador es el decimal
+    norm = s.lastIndexOf(",") > s.lastIndexOf(".") ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");
+  } else if (hasDot) {
+    // "1.337" o "12.345.678" → miles; "227.5" → decimal
+    norm = /^-?\d{1,3}(\.\d{3})+$/.test(s) ? s.replace(/\./g, "") : s;
+  } else if (hasComma) {
+    // "1,337" (miles estilo inglés) o "227,5" (decimal)
+    norm = /^-?\d{1,3}(,\d{3})+$/.test(s) ? s.replace(/,/g, "") : s.replace(",", ".");
+  } else norm = s;
   return parseFloat(norm);
 }
 
