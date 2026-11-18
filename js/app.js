@@ -357,9 +357,12 @@ async function viewProfile() {
       return `<div class="trainrow ${k}">
         <div class="tr-h"><b>${k === 'mod' ? '💪' : '🔥'} ${tt.label}</b><span class="small muted">${tt.ej}</span></div>
         <div class="grid2">
-          <select name="train_${k}_sessions">${[0, 1, 2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${cur.n === n ? 'selected' : ''}>${n === 0 ? 'Ninguno' : `${n} ${n === 1 ? 'vez' : 'veces'}/sem`}</option>`).join('')}</select>
-          <select name="train_${k}_minutes">${[20, 30, 45, 60, 75, 90, 120].map((m) => `<option value="${m}" ${cur.min === m ? 'selected' : ''}>${m} min</option>`).join('')}</select>
-        </div></div>`;
+          <div><span class="small muted">Veces por semana</span>
+            <select name="train_${k}_sessions">${[0, 1, 2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${cur.n === n ? 'selected' : ''}>${n === 0 ? 'Ninguna' : `${n} ${n === 1 ? 'vez' : 'veces'}`}</option>`).join('')}</select></div>
+          <div><span class="small muted">Minutos <b>por sesión</b></span>
+            <select name="train_${k}_minutes">${[20, 30, 45, 60, 75, 90, 120].map((m) => `<option value="${m}" ${cur.min === m ? 'selected' : ''}>${m} min</option>`).join('')}</select></div>
+        </div>
+        <div class="small tr-total" id="tot_${k}"></div></div>`;
     }).join('')}
     <p class="small muted">Tu meta considera el promedio de estos entrenos. Cada día se ajusta con lo que realmente entrenes.</p>
     <label>Objetivo</label>
@@ -404,16 +407,28 @@ async function viewProfile() {
     const f = read();
     $('#rateRow').querySelector('div').style.display = C.usesRate(f.goal) ? '' : 'none';
     $('#ageTxt').textContent = f.age ? `· ${f.age} años` : '';
+    ['mod', 'int'].forEach((k) => {
+      const n = f[`train_${k}_sessions`], m = f[`train_${k}_minutes`];
+      const tot = n * m;
+      const h = tot >= 60 ? `${dec(r1(tot / 60))} h` : `${tot} min`;
+      const kcal = Math.round(tot * C.kcalPerMinAt(f, C.TRAINING_TYPES[k].met));
+      $(`#tot_${k}`).textContent = n ? `= ${n} × ${m} min = ${h} a la semana (~${fmt(kcal)} kcal/semana)` : 'Sin entrenos de este tipo.';
+    });
     if (!valid(f)) { $('#calc').innerHTML = '<span class="muted small">Completa sexo, fecha de nacimiento, peso (30–300 kg) y estatura (100–250 cm) para ver tu plan.</span>'; return; }
     const t = C.targets(f);
     const adj = t.adjust === 0 ? 'Sin ajuste (mantención)' : t.adjust < 0 ? `Déficit de ${fmt(-t.adjust)} kcal/día (≈ ${String(Math.abs(t.weeklyChangeKg)).replace('.', ',')} kg/semana)` : `Superávit de ${fmt(t.adjust)} kcal/día`;
     $('#calc').innerHTML = `
       <div class="grid3">
-        <div><div class="v">${fmt(t.bmr)}</div><div class="small muted">TMB (kcal)</div></div>
+        <div><div class="v">${fmt(t.bmr)}</div><div class="small muted">Metabolismo basal</div></div>
         <div><div class="v">${fmt(t.tdee)}</div><div class="small muted">Gasto promedio</div></div>
         <div><div class="v" style="color:var(--accent)">${fmt(t.kcal_target)}</div><div class="small muted">Meta diaria</div></div>
       </div>
       <p class="small" style="text-align:center">${adj}<br><span class="muted">${learnTxt(f)}</span></p>
+      <details class="small muted"><summary>¿Qué significa cada número?</summary>
+        <p><b>Metabolismo basal:</b> lo que tu cuerpo gasta en reposo total, solo para mantenerse vivo (respirar, corazón, temperatura). Se calcula con tu sexo, edad, peso y estatura (fórmula Mifflin-St Jeor).</p>
+        <p><b>Gasto promedio:</b> metabolismo basal + tu actividad diaria + tus entrenos habituales, promediado por día.</p>
+        <p><b>Meta diaria:</b> gasto promedio menos el déficit para tu objetivo. Cada día se ajusta según si entrenaste o no.</p>
+      </details>
       <div class="grid3">
         <div><div class="v" style="color:var(--prot)">${t.protein_g} g</div><div class="small muted">Proteínas</div></div>
         <div><div class="v" style="color:var(--carb)">${t.carbs_g} g</div><div class="small muted">Carbohidratos</div></div>

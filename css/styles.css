@@ -221,3 +221,5 @@ table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
 .trainrow { padding: 10px 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); margin-top: 8px; }
 .trainrow.int { border-color: rgba(220, 38, 38, .45); }
 .tr-h { display: flex; flex-direction: column; margin-bottom: 6px; }
+.tr-total { margin-top: 6px; color: var(--accent); font-weight: 600; }
+.trainrow .grid2 select { margin-top: 2px; }
