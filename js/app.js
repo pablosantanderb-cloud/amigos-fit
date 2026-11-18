@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=19';
+import * as C from './calc.js?v=20';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -25,7 +25,7 @@ const GOAL_SHORT = { lose: 'bajar de peso', lose_tone: 'bajar y tonificar', reco
 const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 function birthPicker(iso) {
   const [y, m, d] = (iso || '').split('-').map(Number);
-  const maxY = new Date().getFullYear() - 12;
+  const maxY = C.chileNow().y - 12;
   const sel = (name, ph, opts, val) => `<select name="${name}" required><option value="">${ph}</option>${opts.map(([v, l]) => `<option value="${v}" ${v === val ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
   return `<label>Fecha de nacimiento <span id="ageTxt" class="muted"></span></label>
     <div class="birth">
@@ -90,7 +90,7 @@ async function renderSyncCard() {
     ${row ? `
       <div class="sync-row"><span class="small muted">Dirección</span><code>${esc(SYNC_URL)}</code>${copyBtn('Copiar dirección', SYNC_URL)}</div>
       <div class="sync-row"><span class="small muted">Tu código personal (no lo compartas)</span><code>${esc(row.token.slice(0, 6))}••••••••${esc(row.token.slice(-4))}</code>${copyBtn('Copiar código', row.token)}</div>
-      <p class="small">${row.last_used_at ? `✅ Última sincronización: ${new Date(row.last_used_at).toLocaleString('es-CL', { dateStyle: 'medium', timeStyle: 'short' })}` : '⏳ Aún no se ha recibido ninguna sincronización.'}</p>
+      <p class="small">${row.last_used_at ? `✅ Última sincronización: ${new Date(row.last_used_at).toLocaleString('es-CL', { dateStyle: 'medium', timeStyle: 'short', timeZone: C.TZ })}` : '⏳ Aún no se ha recibido ninguna sincronización.'}</p>
       <details class="small"><summary><b>Cómo crear el Atajo (5 min, una sola vez)</b></summary>
         <ol class="steps">
           <li>Abre la app <b>Atajos</b> → pestaña <b>Atajos</b> → <b>＋</b>. Nómbralo “Amigos Fit Salud”.</li>
@@ -134,7 +134,7 @@ function agoTxt(iso) {
   if (m < 1) return 'recién';
   if (m < 60) return `hace ${m} min`;
   const h = Math.floor(m / 60);
-  return h < 24 ? `hace ${h} h ${m % 60} min` : new Date(iso).toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' });
+  return h < 24 ? `hace ${h} h ${m % 60} min` : new Date(iso).toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short', timeZone: C.TZ });
 }
 
 // Llama a la función de IA y devuelve el JSON (o lanza un error legible)
@@ -240,7 +240,7 @@ function prettyDate(iso) {
 const shortDate = (iso) => { const [, m, d] = iso.split('-'); return `${d}/${m}`; };
 
 function defaultMeal() {
-  const h = new Date().getHours();
+  const h = C.chileHour();
   if (h < 11) return 'desayuno';
   if (h < 15) return 'almuerzo';
   if (h < 17) return 'snack';
@@ -806,7 +806,7 @@ async function viewToday() {
     ${macroBar('🍞 Carbohidratos', tot.carbs_g, plan.carbs_g, COLORS.carb)}
     ${macroBar('🥑 Grasas', tot.fat_g, plan.fat_g, COLORS.fat)}
     ${isToday ? (() => {
-      const cz = C.macroCoach(plan, tot, new Date().getHours(), { doneMeals: logs.map((l) => mealKey(l.meal)), weightKg: P.weight_kg, trained: (acts.data || []).length > 0, fixed: C.isFixedMode(P) });
+      const cz = C.macroCoach(plan, tot, C.chileHour(), { doneMeals: logs.map((l) => mealKey(l.meal)), weightKg: P.weight_kg, trained: (acts.data || []).length > 0, fixed: C.isFixedMode(P) });
       return `<div class="coach ${cz.tone}"><b>💡 Para lo que queda del día</b><ul>${cz.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
     })() : (() => {
       const rv = C.dayReview(P, plan, tot, balance, (acts.data || []).length > 0);
@@ -958,7 +958,7 @@ async function viewToday() {
   if ($('#creatBtn')) $('#creatBtn').onclick = () => setCreatine(!creatineTaken);
   // Recordatorio: hoy, desde las 17:00, si no está tomada (una vez por sesión y día)
   const remindKey = `af_creat_remind_${d}`;
-  if (P_creatine() && isToday && !creatineTaken && new Date().getHours() >= 17 && !sessionStorage.getItem(remindKey) && !tutorialOpen) {
+  if (P_creatine() && isToday && !creatineTaken && C.chileHour() >= 17 && !sessionStorage.getItem(remindKey) && !tutorialOpen) {
     sessionStorage.setItem(remindKey, '1');
     showModal({
       icon: '💊', title: '¿Tomaste tu creatina?', text: 'Aún no la marcas como tomada hoy. La constancia diaria es lo que la hace efectiva.',

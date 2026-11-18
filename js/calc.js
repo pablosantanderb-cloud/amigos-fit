@@ -108,12 +108,12 @@ export function weightDirection(goal) {
 export const usesRate = (goal) => ['lose', 'lose_tone', 'gain'].includes(goal);
 
 /** Edad exacta a partir de la fecha de nacimiento (YYYY-MM-DD) */
-export function ageFromBirth(iso, today = new Date()) {
+export function ageFromBirth(iso, today = chileNow()) {
   if (!iso) return null;
   const [y, m, d] = iso.split('-').map(Number);
-  let a = today.getFullYear() - y;
-  const mm = today.getMonth() + 1;
-  if (mm < m || (mm === m && today.getDate() < d)) a--;
+  const t = today instanceof Date ? { y: today.getFullYear(), m: today.getMonth() + 1, d: today.getDate() } : today;
+  let a = t.y - y;
+  if (t.m < m || (t.m === m && t.d < d)) a--;
   return a;
 }
 
@@ -240,8 +240,8 @@ export function dayPlan(p, exerciseKcal, watch) {
  */
 export function liveExpenditure(p, watch) {
   if (!watch?.live_at || watch.live_active_kcal == null) return null;
-  const t = new Date(watch.live_at);
-  const frac = (t.getHours() * 60 + t.getMinutes()) / 1440;
+  const t = chileNow(new Date(watch.live_at));
+  const frac = (t.h * 60 + t.min) / 1440;
   const rest = Number(watch.live_resting_kcal) || 0;
   const restFull = frac >= 0.25 && rest > 0 ? Math.max(bmr(p) * 0.85, Math.min(bmr(p) * 1.25, rest / frac)) : bmr(p);
   const act = Math.round((Number(watch.live_active_kcal) || 0) * creditPct(p));
@@ -339,15 +339,28 @@ export function targets(p) {
   return { bmr: B, tdee: T, kcal_target: kcal, protein_g, carbs_g, fat_g, adjust: Math.round(realDeficit), weeklyChangeKg, warning };
 }
 
-/** Fecha local YYYY-MM-DD (evita desfases UTC) */
-export function isoDate(d = new Date()) {
+// ---- Hora oficial de la app: Santiago de Chile (independiente de la zona horaria del teléfono)
+export const TZ = 'America/Santiago';
+const tzFmt = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+/** Fecha y hora en Santiago para un instante (por defecto, ahora) */
+export function chileNow(instant = new Date()) {
+  const o = Object.fromEntries(tzFmt.formatToParts(instant).map((x) => [x.type, x.value]));
+  const h = Number(o.hour) % 24; // algunos navegadores devuelven "24" a medianoche
+  return { y: Number(o.year), m: Number(o.month), d: Number(o.day), h, min: Number(o.minute), iso: `${o.year}-${o.month}-${o.day}` };
+}
+/** Hora actual (0–23) en Santiago */
+export const chileHour = () => chileNow().h;
+
+/** Fecha YYYY-MM-DD. Sin argumento: HOY en Santiago. Con un Date armado con año/mes/día: esa fecha. */
+export function isoDate(d) {
+  if (!d) return chileNow().iso;
   const z = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
 }
 
 export function addDays(iso, n) {
   const [y, m, d] = iso.split('-').map(Number);
-  const dt = new Date(y, m - 1, d + n);
+  const dt = new Date(y, m - 1, d + n, 12); // mediodía: evita saltos por cambio de horario
   return isoDate(dt);
 }
 
