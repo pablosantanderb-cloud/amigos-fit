@@ -126,6 +126,8 @@ alter table public.profiles add column if not exists train_int_minutes int;
 
 alter table public.profiles add column if not exists tutorial_done boolean default false;
 
+alter table public.profiles add column if not exists target_mode text default 'dynamic' check (target_mode in ('dynamic','average'));
+
 -- ---------- GRUPOS ----------
 create table if not exists public.groups (
   id          uuid primary key default gen_random_uuid(),
@@ -267,8 +269,8 @@ agg as (
     count(d.log_date)::int as days_logged,
     -- meta del día = meta base + (entreno del día − entreno promedio habitual), igual que en la app
     (count(*) filter (where m.kcal_target > 0 and d.kcal between
-        (m.kcal_target + coalesce(ex.kc, 0) - k.avg_train) * 0.9 and
-        (m.kcal_target + coalesce(ex.kc, 0) - k.avg_train) * 1.1))::int as kcal_ok,
+        (case when m.target_mode = 'average' then m.kcal_target else m.kcal_target + coalesce(ex.kc, 0) - k.avg_train end) * 0.9 and
+        (case when m.target_mode = 'average' then m.kcal_target else m.kcal_target + coalesce(ex.kc, 0) - k.avg_train end) * 1.1))::int as kcal_ok,
     (count(*) filter (where m.protein_g > 0 and d.prot >= m.protein_g * 0.9))::int as prot_ok,
     round(avg(d.kcal))::numeric as avg_kcal
   from m join kpm k on k.id = m.id

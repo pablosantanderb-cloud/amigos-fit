@@ -186,14 +186,22 @@ export function dayBase(p) {
  * Día con entreno → la meta sube; día sin entreno → baja (nunca bajo tu metabolismo basal / mínimo saludable).
  * Proteína y grasas se mantienen; la diferencia se ajusta en carbohidratos.
  */
+/** Modos de meta diaria */
+export const TARGET_MODES = {
+  dynamic: { label: '📈 Se ajusta con cada entreno', desc: 'La meta parte de tu gasto sin ejercicio y sube cuando registras un entrenamiento. Los días sin entreno es menor.' },
+  average: { label: '📊 Fija con mi ejercicio promedio', desc: 'La meta ya incluye tu ejercicio semanal promedio y es igual todos los días. Registrar un entreno no la cambia (ya está considerado).' },
+};
+export const isFixedMode = (p) => p.target_mode === 'average';
+
 export function dayPlan(p, exerciseKcal, watch) {
-  // La META solo depende de lo que se puede controlar durante el día: gasto base + entrenos registrados.
-  // El cierre del reloj (que llega al día siguiente) NO la mueve: solo cambia el déficit REAL (spent).
+  // Modo dinámico: meta = gasto base + entrenos registrados − déficit.
+  // Modo promedio: meta fija = gasto promedio (con ejercicio semanal promedio) − déficit; los entrenos no la mueven.
+  // En ambos, el cierre del reloj (que llega al día siguiente) NO mueve la meta: solo cambia el déficit REAL (spent).
   const planned = dayExpenditure(p, exerciseKcal, null);
   const spent = dayExpenditure(p, exerciseKcal, watch);
   const deficit = targetDeficit(p);
   const floor = Math.max(bmr(p), p.sex === 'M' ? 1500 : 1200);
-  let kcal = Math.round(planned.kcal - deficit);
+  let kcal = isFixedMode(p) ? (p.kcal_target || 0) : Math.round(planned.kcal - deficit);
   if (deficit > 0) kcal = Math.max(Math.round(floor), kcal);
   const carbs_g = Math.max(0, Math.round((kcal - p.protein_g * 4 - p.fat_g * 9) / 4));
   return { kcal_target: kcal, protein_g: p.protein_g, carbs_g, fat_g: p.fat_g, planned, spent, deficit, delta: kcal - (p.kcal_target || 0) };
@@ -380,7 +388,7 @@ export function exerciseFor(kcal, weightKg) {
  * Devuelve { tone: 'ok'|'warn'|'info', items: [texto] } (máx. 4 frases cortas)
  */
 export function macroCoach(t, eaten, hour, opts = {}) {
-  const { doneMeals = [], weightKg = 70, trained = false } = Array.isArray(opts) ? { doneMeals: opts } : opts;
+  const { doneMeals = [], weightKg = 70, trained = false, fixed = false } = Array.isArray(opts) ? { doneMeals: opts } : opts;
   const left = { kcal: t.kcal_target - eaten.kcal, p: t.protein_g - eaten.protein_g, c: t.carbs_g - eaten.carbs_g, f: t.fat_g - eaten.fat_g };
   const ORDER = ['desayuno', 'almuerzo', 'once', 'cena'];
   const lastDone = Math.max(-1, ...doneMeals.map((m) => ORDER.indexOf(m)));
@@ -392,7 +400,7 @@ export function macroCoach(t, eaten, hour, opts = {}) {
   if (eaten.kcal === 0) {
     items.push(`🍽️ Reparte ~${r(t.kcal_target / n)} kcal y ~${r(t.protein_g / n)} g de proteína por comida${meals.length > 1 ? ` (${meals.join(', ')})` : ''}.`);
     items.push('🥗 Plato: ½ verduras, ¼ proteína magra, ¼ carbohidratos.');
-    if (!trained && hour < 20) items.push('🏃 Si entrenas hoy, regístralo: tu meta sube.');
+    if (!trained && hour < 20) items.push(fixed ? '🏃 Tu meta ya incluye tu ejercicio promedio: cumple tu entreno de hoy.' : '🏃 Si entrenas hoy, regístralo: tu meta sube.');
     return { tone: 'info', items };
   }
 
@@ -433,7 +441,7 @@ export function macroCoach(t, eaten, hour, opts = {}) {
   // Ejercicio
   if (!trained && hour >= 6 && hour < 21 && items.length < 4) {
     const ex = exerciseFor(200, weightKg);
-    items.push(`🏃 Sin entreno hoy: ${ex.walk} min de caminata suma ~200 kcal a tu margen.`);
+    items.push(fixed ? `🏃 Tu meta asume que entrenas: si hoy no lo haces, ${ex.walk} min de caminata ayudan a mantener el déficit.` : `🏃 Sin entreno hoy: ${ex.walk} min de caminata suma ~200 kcal a tu margen.`);
   }
   if (!meals.length && left.kcal > 300) items.push(`🌙 Ya es tarde: no fuerces comer las ${r(left.kcal)} kcal que quedan.`);
 

@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=14';
+import * as C from './calc.js?v=15';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -468,6 +468,9 @@ async function viewProfile() {
       <div><label>Peso actual (kg)</label>${decInput('weight_kg', p.weight_kg, 'required placeholder="Ej: 78,5"')}</div>
       <div><label>Estatura (cm)</label>${decInput('height_cm', p.height_cm, 'required placeholder="Ej: 172"')}</div>
     </div>
+    <label>¿Cómo quieres tu meta diaria de calorías?</label>
+    <div class="modes">${Object.entries(C.TARGET_MODES).map(([k, v]) => `<label class="mode-opt"><input type="radio" name="target_mode" value="${k}" ${(p.target_mode || 'dynamic') === k ? 'checked' : ''}><span><b>${v.label}</b><small>${v.desc}</small></span></label>`).join('')}</div>
+    <p class="small muted">En ambos casos puedes cerrar el día con el gasto de tu reloj para ver tu déficit real.</p>
     <div class="noexercise">
       <label style="margin-top:0">🚶 Actividad de tu día a día</label>
       <div class="flag">⚠️ SIN contar entrenamientos: solo trabajo, casa, traslados y pasos normales</div>
@@ -575,7 +578,7 @@ async function viewProfile() {
       activity_level: f.activity_level, goal: f.goal, rate_kg_week: f.rate_kg_week,
       target_weight_kg: num(f.target_weight_kg) || null,
       weekly_activity_goal_min: parseInt(f.weekly_activity_goal_min, 10) || 0,
-      exercise_credit_pct: f.exercise_credit_pct, activity_basis: 'v3',
+      exercise_credit_pct: f.exercise_credit_pct, activity_basis: 'v3', target_mode: f.target_mode || 'dynamic',
       train_mod_sessions: f.train_mod_sessions, train_mod_minutes: f.train_mod_minutes, train_int_sessions: f.train_int_sessions, train_int_minutes: f.train_int_minutes,
       start_weight_kg: p.start_weight_kg ?? f.weight_kg,
       bmr: t.bmr, tdee: t.tdee, kcal_target: t.kcal_target, protein_g: t.protein_g, carbs_g: t.carbs_g, fat_g: t.fat_g,
@@ -683,13 +686,15 @@ async function viewToday() {
           <b style="color:${remaining >= 0 ? 'var(--accent)' : 'var(--danger)'}">${fmt(Math.abs(remaining))}</b></div>
       </div>
     </div>
-    <p class="small muted" style="margin:10px 0 0">🎯 Meta = gasto estimado ${fmt(plan.planned.kcal)} (base ${fmt(C.dayBase(P))}${actKcal ? ` + entreno ${fmt(actKcal)}` : ''}) − ${defTxt} objetivo.
-      ${actKcal ? '' : 'Sin entreno registrado: si entrenas, tu meta sube.'}</p>
+    <p class="small muted" style="margin:10px 0 0">${C.isFixedMode(P)
+      ? `🎯 Meta fija = gasto promedio ${fmt(C.tdee(P))} (incluye tu ejercicio semanal promedio) − ${defTxt} objetivo. Los entrenos no la cambian.`
+      : `🎯 Meta = gasto estimado ${fmt(plan.planned.kcal)} (base ${fmt(C.dayBase(P))}${actKcal ? ` + entreno ${fmt(actKcal)}` : ''}) − ${defTxt} objetivo.`}
+      ${C.isFixedMode(P) || actKcal ? '' : 'Sin entreno registrado: si entrenas, tu meta sube.'}</p>
     ${macroBar('🥩 Proteínas', tot.protein_g, plan.protein_g, COLORS.prot)}
     ${macroBar('🍞 Carbohidratos', tot.carbs_g, plan.carbs_g, COLORS.carb)}
     ${macroBar('🥑 Grasas', tot.fat_g, plan.fat_g, COLORS.fat)}
     ${isToday ? (() => {
-      const cz = C.macroCoach(plan, tot, new Date().getHours(), { doneMeals: logs.map((l) => mealKey(l.meal)), weightKg: P.weight_kg, trained: (acts.data || []).length > 0 });
+      const cz = C.macroCoach(plan, tot, new Date().getHours(), { doneMeals: logs.map((l) => mealKey(l.meal)), weightKg: P.weight_kg, trained: (acts.data || []).length > 0, fixed: C.isFixedMode(P) });
       return `<div class="coach ${cz.tone}"><b>💡 Para lo que queda del día</b><ul>${cz.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
     })() : (() => {
       const rv = C.dayReview(P, plan, tot, balance, (acts.data || []).length > 0);
@@ -715,7 +720,7 @@ async function viewToday() {
   <div class="card">
     <h2>🏃 Entrenamientos</h2>
     ${(acts.data || []).map((a) => `<div class="row between food"><div class="info"><div class="name">${a.source === 'reloj' ? '⌚ ' : ''}${esc(a.activity)}</div>
-      <div class="mac">${a.minutes} min${a.kcal_burned ? ` · ${fmt(a.kcal_burned)} kcal` : ''}${a.steps ? ` · ${fmt(a.steps)} pasos` : ''}${a.distance_km ? ` · ${dec(r1(a.distance_km))} km` : ''} · suma ${fmt(C.activityKcal(P, a))} kcal a tu meta</div></div>
+      <div class="mac">${a.minutes} min${a.kcal_burned ? ` · ${fmt(a.kcal_burned)} kcal` : ''}${a.steps ? ` · ${fmt(a.steps)} pasos` : ''}${a.distance_km ? ` · ${dec(r1(a.distance_km))} km` : ''} · ${C.isFixedMode(P) ? `~${fmt(C.activityKcal(P, a))} kcal (ya incluido en tu meta)` : `suma ${fmt(C.activityKcal(P, a))} kcal a tu meta`}</div></div>
       <button class="icon-btn" data-delact="${a.id}">🗑️</button></div>`).join('') || `<p class="muted small">Sin entrenamientos ${isToday ? 'hoy' : 'este día'}.</p>`}
     <button type="button" id="aToggle" class="btn block" style="margin-top:8px">➕ Agregar entrenamiento</button>
     <div id="aPanel" class="hidden">
