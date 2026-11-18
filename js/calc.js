@@ -103,6 +103,21 @@ export function parseNum(v) {
 
 const KCAL_PER_KG = 7700; // energía aproximada de 1 kg de tejido corporal
 
+/** g de proteína por kg de peso de referencia según objetivo (ISSN: 1,4–2,0 g/kg en personas activas) */
+export const PROTEIN_PER_KG = { lose: 1.8, lose_tone: 2.0, recomp: 2.0, gain: 1.8, fitness: 1.6, maintain: 1.4 };
+
+/**
+ * Peso de referencia para proteína y grasas: con IMC > 25 se usa el peso a IMC 25 + 25% del exceso
+ * (la proteína se necesita para el músculo, no para la grasa corporal). Con IMC ≤ 25, el peso real.
+ */
+export function referenceWeight(p) {
+  const w = Number(p.weight_kg) || 0;
+  const h = (Number(p.height_cm) || 0) / 100;
+  if (!h) return w;
+  const w25 = 25 * h * h;
+  return w > w25 ? Math.round((w25 + 0.25 * (w - w25)) * 10) / 10 : w;
+}
+
 /** Metabolismo basal — Mifflin-St Jeor */
 export function bmr({ sex, weight_kg, height_cm, age }) {
   const base = 10 * weight_kg + 6.25 * height_cm - 5 * age;
@@ -261,10 +276,12 @@ export function targets(p) {
     warning = `Ajustamos la meta a ${kcal} kcal para no bajar de tu metabolismo basal / mínimo saludable. El ritmo real será más lento.`;
   }
 
-  const proteinPerKg = { lose: 2.0, lose_tone: 2.2, recomp: 2.2, gain: 1.8 }[p.goal] ?? 1.6;
+  // Proteína: g/kg de PESO DE REFERENCIA (ajustado si hay sobrepeso) y nunca más del 30% de las calorías
+  const ref = referenceWeight(p);
+  const perKg = PROTEIN_PER_KG[p.goal] ?? 1.6;
+  const protein_g = Math.round(Math.min(perKg * ref, (kcal * 0.30) / 4));
   const fatShare = p.goal === 'fitness' ? 0.2 : 0.25;
-  const protein_g = Math.round(proteinPerKg * p.weight_kg);
-  const fat_g = Math.round(Math.max(0.6 * p.weight_kg, (kcal * fatShare) / 9));
+  const fat_g = Math.round(Math.max(0.6 * ref, (kcal * fatShare) / 9));
   const carbs_g = Math.max(0, Math.round((kcal - protein_g * 4 - fat_g * 9) / 4));
 
   const realDeficit = kcal - T;

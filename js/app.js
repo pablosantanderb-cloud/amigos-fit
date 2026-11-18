@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=13';
+import * as C from './calc.js?v=14';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -233,7 +233,11 @@ async function loadProfile() {
       if (L.avg) upd.learned_tdee = L.avg;
     }
   }
+  // Recalcula siempre con las fórmulas vigentes (si cambian, los perfiles existentes se actualizan solos)
+  const tNow = C.targets({ ...profile, ...upd });
+  if (['bmr', 'tdee', 'kcal_target', 'protein_g', 'carbs_g', 'fat_g'].some((k) => Number(profile[k]) !== tNow[k])) upd._recalc = true;
   if (Object.keys(upd).length) {
+    delete upd._recalc;
     const next = { ...profile, ...upd };
     const t = C.targets(next);
     Object.assign(upd, { bmr: t.bmr, tdee: t.tdee, kcal_target: t.kcal_target, protein_g: t.protein_g, carbs_g: t.carbs_g, fat_g: t.fat_g });
@@ -549,6 +553,7 @@ async function viewProfile() {
         <p><b>Metabolismo basal:</b> lo que tu cuerpo gasta en reposo total, solo para mantenerse vivo (respirar, corazón, temperatura). Se calcula con tu sexo, edad, peso y estatura (fórmula Mifflin-St Jeor).</p>
         <p><b>Gasto promedio:</b> metabolismo basal + tu actividad diaria + tus entrenos habituales, promediado por día.</p>
         <p><b>Meta diaria:</b> gasto promedio menos el déficit para tu objetivo. Cada día se ajusta según si entrenaste o no.</p>
+        <p><b>Proteína:</b> ${String(C.PROTEIN_PER_KG[f.goal] ?? 1.6).replace('.', ',')} g por kg de tu peso de referencia (${dec(C.referenceWeight(f))} kg${C.referenceWeight(f) < f.weight_kg ? ', tu peso ajustado por IMC: la proteína se calcula para tu músculo, no para la grasa' : ''}), con un tope de 30% de tus calorías. <b>Grasas:</b> 25% de las calorías. <b>Carbohidratos:</b> el resto.</p>
       </details>
       <div class="grid3">
         <div><div class="v" style="color:var(--prot)">${t.protein_g} g</div><div class="small muted">Proteínas</div></div>
