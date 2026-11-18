@@ -1440,8 +1440,36 @@ function renderDailyCompare(rows, error, from, to, members) {
           return `<span class="cal-c ${cls(pv)}${d === today ? ' cal-today' : ''}" title="${fmt(val)} / ${fmt(tgt)}">${pv}%</span>`;
         }).join('')}</div>`).join('')}
     </div>
-    <p class="small muted"><span class="dot dg"></span> en objetivo · <span class="dot dy"></span> bajo · <span class="dot dr"></span> sobre · — sin registro · borde punteado = hoy (en curso)</p>`;
+    <p class="small muted"><span class="dot dg"></span> en objetivo · <span class="dot dy"></span> bajo · <span class="dot dr"></span> sobre · — sin registro · borde punteado = hoy (en curso)</p>
+    <h3 style="margin-top:14px">📈 ${MAC[mk][0]} diaria – esta semana</h3>
+    <div class="chips" id="dcPeople"><button type="button" class="chip-btn ${!state.dcOnly ? 'on' : ''}" data-dcp="">Todos</button>${Object.entries(byUser).map(([uid, u]) => `<button type="button" class="chip-btn ${state.dcOnly === uid ? 'on' : ''}" data-dcp="${uid}">${esc(u.name)}</button>`).join('')}</div>
+    <div class="chart-box"><canvas id="dcChart"></canvas></div>
+    <p class="small muted">% de la meta de cada uno. La línea punteada es el 100% (objetivo).</p>`;
   $$('#dailyCmp [data-dck]').forEach((b) => (b.onclick = () => { state.mcMacro = b.dataset.dck; renderDailyCompare(rows, null, from, to, members); }));
+  $$('#dailyCmp [data-dcp]').forEach((b) => (b.onclick = () => { state.dcOnly = b.dataset.dcp || null; renderDailyCompare(rows, null, from, to, members); }));
+
+  // gráfico de líneas: una línea por persona (o solo la elegida), en % de su propia meta
+  if (renderDailyCompare.chart) { renderDailyCompare.chart.destroy(); charts = charts.filter((c) => c !== renderDailyCompare.chart); }
+  const people = Object.entries(byUser).filter(([uid]) => !state.dcOnly || state.dcOnly === uid);
+  const datasets = people.map(([uid, u]) => {
+    const color = PALETTE[Object.keys(byUser).indexOf(uid) % PALETTE.length];
+    return {
+      label: u.name, borderColor: color, backgroundColor: color, tension: 0.3, spanGaps: true, pointRadius: 4, borderWidth: 2.5,
+      data: days.map((d) => { const r = u.d[d]; const t = r && Number(r[tkey]); return r && t ? Math.round((Number(r[key]) / t) * 100) : null; }),
+    };
+  });
+  datasets.push({ label: 'Objetivo', data: days.map(() => 100), borderColor: COLORS.target, borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5 });
+  renderDailyCompare.chart = chart($('#dcChart'), {
+    type: 'line',
+    data: { labels: days.map((d) => `${dow(d)} ${Number(d.slice(8))}`), datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: tickColor(), boxWidth: 10, filter: (it) => it.text !== 'Objetivo' } },
+        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y}%` } } },
+      scales: { x: { grid: { display: false }, ticks: { color: tickColor() } },
+        y: { suggestedMin: 0, suggestedMax: 150, grid: { color: gridColor() }, ticks: { color: tickColor(), callback: (v) => v + '%' } } },
+    },
+  });
 }
 
 // Comparación de macros: cada valor como % del objetivo de CADA persona (100% = cumplió), porque las metas son distintas.

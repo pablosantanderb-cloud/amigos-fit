@@ -341,3 +341,5 @@ table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
 .cal-today { outline: 2px dashed var(--text); outline-offset: 1px; opacity: .85; }
 .dg { background: #16a34a; } .dy { background: #d97706; } .dr { background: #dc2626; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; }
+.chip-btn { font: inherit; font-size: .8rem; padding: 5px 12px; border-radius: 99px; border: 1px solid var(--line); background: none; color: var(--text); cursor: pointer; }
+.chip-btn.on { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 700; }
