@@ -204,3 +204,7 @@ label.btn { position: relative; }
 input[type="date"] { min-width: 0; max-width: 100%; -webkit-appearance: none; appearance: none; }
 .train { display: grid; grid-template-columns: 0.9fr 1.1fr 1.4fr; gap: 8px; }
 .train select { padding-left: 10px; padding-right: 4px; }
+table.bal { width: 100%; border-collapse: collapse; font-size: .85rem; margin-top: 6px; }
+table.bal td { padding: 3px 0; vertical-align: top; }
+table.bal td:last-child { text-align: right; white-space: nowrap; padding-left: 10px; font-variant-numeric: tabular-nums; }
+table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }

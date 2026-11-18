@@ -505,14 +505,20 @@ async function viewToday() {
       </div>
     </div>
     ${tot.kcal > 0 ? `<div class="balance ${balance < 0 ? 'ok' : 'over'}">
-      <span>${spent.source === 'reloj' ? '⌚ Balance real (reloj)' : '📐 Balance estimado'}</span>
-      <b>${balance < 0 ? `Déficit de ${fmt(-balance)} kcal` : `Superávit de ${fmt(balance)} kcal`}</b>
-      <span class="small muted">${spent.source === 'reloj'
-        ? `Gasto del reloj ${fmt(spent.kcal)} − comido ${fmt(tot.kcal)}`
-        : `Gasto de hoy ${fmt(spent.kcal)} = vida diaria ${fmt(C.baseNoTraining(P))} + ${actKcal ? `entreno ${fmt(actKcal)}` : 'sin entreno registrado'} · comido ${fmt(tot.kcal)}`}</span>
-      ${spent.source !== 'reloj' && !actKcal && C.avgTrainingKcal(P) > 0 ? '<span class="small muted">Hoy no hay entreno registrado, por eso el déficit es menor que el de tu meta. Si entrenaste, regístralo abajo.</span>' : ''}
-      ${spent.source !== 'reloj' ? '<span class="small muted">Para el balance real, agrega al final del día el gasto total de tu reloj.</span>' : ''}
-    </div>` : ''}
+      <div class="row between"><span>${spent.source === 'reloj' ? '⌚ Balance del día (reloj)' : '📐 Balance del día (estimado)'}</span>
+        <b>${balance < 0 ? `Déficit ${fmt(-balance)}` : `Superávit ${fmt(balance)}`} kcal</b></div>
+      <table class="bal">
+        ${spent.source === 'reloj'
+          ? `<tr><td>Gasto según tu reloj${watch.active_kcal ? ` (reposo ${fmt(watch.resting_kcal || watch.total_kcal - watch.active_kcal)} + ${P.exercise_credit_pct ?? C.DEFAULT_CREDIT}% de activa ${fmt(watch.active_kcal)})` : ''}</td><td>${fmt(spent.kcal)}</td></tr>`
+          : `<tr><td>Gasto sin ejercicio <span class="muted">(metabolismo ${fmt(C.bmr(P))} × actividad diaria ${String(C.ACTIVITY_LEVELS[P.activity_level]?.factor ?? 1.2).replace('.', ',')})</span></td><td>${fmt(C.baseNoTraining(P))}</td></tr>
+             <tr><td>+ Ejercicio registrado este día</td><td>${actKcal ? `+${fmt(actKcal)}` : '0'}</td></tr>
+             <tr class="sum"><td>= Gasto del día</td><td>${fmt(spent.kcal)}</td></tr>`}
+        <tr><td>− Comido</td><td>−${fmt(tot.kcal)}</td></tr>
+        <tr class="sum"><td>= ${balance < 0 ? 'Déficit' : 'Superávit'}</td><td>${fmt(Math.abs(balance))}</td></tr>
+      </table>
+      ${spent.source !== 'reloj' ? `<span class="small muted">${actKcal ? '' : 'Si entrenaste este día, regístralo abajo: tu gasto sube y el déficit aumenta. '}Para un balance más exacto, ingresa abajo el gasto total de tu reloj.</span>` : ''}
+    </div>
+    ${C.avgTrainingKcal(P) > 0 ? `<p class="small muted" style="margin-top:8px">ℹ️ Tu meta de ${fmt(P.kcal_target)} kcal está calculada sobre tu gasto promedio de ${fmt(C.tdee(P))} (sin ejercicio ${fmt(C.baseNoTraining(P))} + ${fmt(C.avgTrainingKcal(P))} de tus entrenos habituales repartidos en la semana).</p>` : ''}` : ''}
     ${macroBar('🥩 Proteínas', tot.protein_g, P.protein_g, COLORS.prot)}
     ${macroBar('🍞 Carbohidratos', tot.carbs_g, P.carbs_g, COLORS.carb)}
     ${macroBar('🥑 Grasas', tot.fat_g, P.fat_g, COLORS.fat)}
