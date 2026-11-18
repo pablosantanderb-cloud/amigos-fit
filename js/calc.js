@@ -60,16 +60,18 @@ export function avgTrainingKcal(p) {
 
 /** Tipos de entrenamiento (nombres como en Apple Watch), con ícono y MET aproximado */
 export const WORKOUT_TYPES = [
-  { name: 'Fútbol al aire libre', icon: '⚽', met: 9, color: '#16a34a' },
-  { name: 'Caminata al aire libre', icon: '🚶', met: 4, color: '#0ea5e9' },
-  { name: 'Trote al aire libre', icon: '🏃', met: 8, color: '#f97316' },
-  { name: 'Bicicleta al aire libre', icon: '🚴', met: 7, color: '#eab308' },
-  { name: 'Senderismo', icon: '🥾', met: 6, color: '#a16207' },
-  { name: 'Elíptica', icon: '♾️', met: 6, color: '#8b5cf6' },
-  { name: 'Entrenamiento funcional', icon: '🤸', met: 6, color: '#ec4899' },
-  { name: 'Fuerza tradicional', icon: '🏋️', met: 5, color: '#ef4444' },
-  { name: 'Intervalos (HIIT)', icon: '⏱️', met: 9, color: '#dc2626' },
+  { slug: 'futbol', name: 'Fútbol al aire libre', icon: '⚽', met: 9, color: '#16a34a' },
+  { slug: 'caminata', name: 'Caminata al aire libre', icon: '🚶', met: 4, color: '#0ea5e9' },
+  { slug: 'trote', name: 'Trote al aire libre', icon: '🏃', met: 8, color: '#f97316' },
+  { slug: 'bicicleta', name: 'Bicicleta al aire libre', icon: '🚴', met: 7, color: '#eab308' },
+  { slug: 'senderismo', name: 'Senderismo', icon: '🥾', met: 6, color: '#a16207' },
+  { slug: 'eliptica', name: 'Elíptica', icon: '♾️', met: 6, color: '#8b5cf6' },
+  { slug: 'funcional', name: 'Entrenamiento funcional', icon: '🤸', met: 6, color: '#ec4899' },
+  { slug: 'fuerza', name: 'Fuerza tradicional', icon: '🏋️', met: 5, color: '#ef4444' },
+  { slug: 'hiit', name: 'Intervalos (HIIT)', icon: '⏱️', met: 9, color: '#dc2626' },
 ];
+// Íconos propios disponibles en img/workouts/<slug>.png (se agregan aquí al subirlos; mientras, se usa el emoji)
+export const WORKOUT_ICON_FILES = new Set([]);
 
 /** Convierte kcal TOTALES de una sesión a ACTIVAS: quita la parte de reposo (1 MET) según la intensidad */
 export function totalToActive(totalKcal, met) {

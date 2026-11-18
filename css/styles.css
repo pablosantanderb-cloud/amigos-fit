@@ -292,3 +292,17 @@ table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
 .kpis3 > div { background: var(--bg); border-radius: 12px; padding: 8px 4px; display: flex; flex-direction: column; gap: 2px; }
 .kpis3 span { font-size: .75rem; }
 .kpis3 b { font-size: 1.1rem; }
+
+.wk-dd { position: relative; }
+.wk-sel { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; text-align: left; min-height: 52px; }
+.wk-sel > span:not(.wk-ic) { flex: 1; }
+.wk-sel i { font-style: normal; color: var(--muted); }
+.wk-ph { color: var(--muted); font-weight: 400; }
+.wk-menu { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 30; max-height: 330px; overflow-y: auto; background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 32px rgba(0,0,0,.3); padding: 6px; }
+.wk-opt { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px; border: 0; border-radius: 10px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.wk-opt > span:not(.wk-ic) { flex: 1; }
+.wk-opt b { color: var(--accent); }
+.wk-opt.on, .wk-opt:hover { background: var(--accent-soft); }
+.wk-ic { width: 34px !important; height: 34px !important; font-size: 1.05rem !important; }
+.wk-img { width: 34px; height: 34px; flex: none; border-radius: 50%; object-fit: cover; }
+.wk-sel .wk-ic, .wk-opt .wk-ic { flex: none; }

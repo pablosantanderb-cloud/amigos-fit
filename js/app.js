@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=16';
+import * as C from './calc.js?v=17';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -58,6 +58,7 @@ function workoutIcon(name = '') {
   const w = C.WORKOUT_TYPES.find((x) => x.name.toLowerCase() === String(name).toLowerCase())
     || (profile?.custom_workouts || []).map((x) => ({ ...x, color: '#64748b' })).find((x) => x.name.toLowerCase() === String(name).toLowerCase());
   const guess = /f[uú]tbol/i.test(name) ? '⚽' : /camin/i.test(name) ? '🚶' : /corr|trote/i.test(name) ? '🏃' : /bici/i.test(name) ? '🚴' : /pesa|fuerza/i.test(name) ? '🏋️' : /nata/i.test(name) ? '🏊' : '🏅';
+  if (w?.slug && C.WORKOUT_ICON_FILES.has(w.slug)) return `<img class="wk-img" src="img/workouts/${w.slug}.png?v=1" alt="">`;
   return `<span class="wk-ic" style="--wc:${w?.color || '#64748b'}">${w?.icon || guess}</span>`;
 }
 
@@ -757,7 +758,10 @@ async function viewToday() {
       </div>
       <form id="af">
         <label style="margin-top:0">Tipo de entrenamiento</label>
-        <div class="wk-grid" id="wkGrid"></div>
+        <div class="wk-dd" id="wkDD">
+          <button type="button" class="wk-sel" id="wkSel"></button>
+          <div class="wk-menu hidden" id="wkMenu"></div>
+        </div>
         <input type="hidden" name="activity" required>
         <div id="wkNew" class="row hidden" style="margin-top:8px">
           <input id="wkNewIcon" maxlength="4" placeholder="🏅" style="width:56px;text-align:center">
@@ -883,14 +887,20 @@ async function viewToday() {
   // --- Selector de tipo de entrenamiento (con tipos propios guardados en el perfil)
   let kcalType = 'active';
   const allWorkouts = () => [...C.WORKOUT_TYPES, ...(P.custom_workouts || []).map((w) => ({ ...w, met: C.metForActivity(w.name), color: '#64748b' }))];
+  // Lista desplegable con íconos (un <select> nativo no permite imágenes)
   const renderWk = () => {
     const cur = $('#af').activity.value;
-    $('#wkGrid').innerHTML = allWorkouts().map((w) => `<button type="button" class="wk ${w.name === cur ? 'on' : ''}" data-wk="${esc(w.name)}">${workoutIcon(w.name)}<span>${esc(w.name)}</span></button>`).join('')
-      + '<button type="button" class="wk wk-add" id="wkAdd"><span class="wk-ic" style="--wc:#94a3b8">＋</span><span>Otro</span></button>';
-    $$('[data-wk]').forEach((b) => (b.onclick = () => { $('#af').activity.value = b.dataset.wk; renderWk(); }));
-    $('#wkAdd').onclick = () => { $('#wkNew').classList.remove('hidden'); $('#wkNewName').focus(); };
+    $('#wkSel').innerHTML = cur
+      ? `${workoutIcon(cur)}<span>${esc(cur)}</span><i>▾</i>`
+      : '<span class="wk-ph">Elige el tipo de entrenamiento</span><i>▾</i>';
+    $('#wkMenu').innerHTML = allWorkouts().map((w) => `<button type="button" class="wk-opt ${w.name === cur ? 'on' : ''}" data-wk="${esc(w.name)}">${workoutIcon(w.name)}<span>${esc(w.name)}</span>${w.name === cur ? '<b>✓</b>' : ''}</button>`).join('')
+      + '<button type="button" class="wk-opt wk-add" id="wkAdd"><span class="wk-ic" style="--wc:#94a3b8">＋</span><span>Agregar otro tipo…</span></button>';
+    $$('[data-wk]').forEach((b) => (b.onclick = () => { $('#af').activity.value = b.dataset.wk; $('#wkMenu').classList.add('hidden'); renderWk(); }));
+    $('#wkAdd').onclick = () => { $('#wkMenu').classList.add('hidden'); $('#wkNew').classList.remove('hidden'); $('#wkNewName').focus(); };
   };
   renderWk();
+  $('#wkSel').onclick = (e) => { e.stopPropagation(); $('#wkMenu').classList.toggle('hidden'); };
+  document.addEventListener('click', (e) => { const m = $('#wkMenu'); if (m && !e.target.closest('#wkDD')) m.classList.add('hidden'); });
   $('#wkNewOk').onclick = async () => {
     const name = $('#wkNewName').value.trim();
     if (!name) return toast('Escribe el nombre del entrenamiento', true);
