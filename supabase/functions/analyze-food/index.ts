@@ -114,7 +114,8 @@ async function flashModels(): Promise<string[]> {
       .filter((m) => m.supportedGenerationMethods?.includes("generateContent"))
       .map((m) => m.name.replace(/^models\//, ""))
       .filter((n) => /^gemini-\d+(\.\d+)?-flash$/.test(n) || /^gemini-\d+(\.\d+)?-flash-lite$/.test(n))
-      .sort((a, b) => ver(b) - ver(a) || Number(a.includes("lite")) - Number(b.includes("lite")));
+      // Primero los "lite" (mucho más rápidos), del más nuevo al más antiguo; luego los flash normales
+      .sort((a, b) => Number(b.includes("lite")) - Number(a.includes("lite")) || ver(b) - ver(a));
     modelCache = { at: Date.now(), list };
     console.log("Modelos flash disponibles:", list.join(", "));
     return list;
@@ -170,7 +171,7 @@ async function handle(req: Request): Promise<Response> {
   let lastErr = { status: 0, message: "" };
   outer: for (const model of models) {
     // Los modelos 3.x "piensan" antes de responder; pedimos razonamiento bajo para que sea rápido.
-    const configs = /^gemini-[3-9]/.test(model) ? [{ ...baseConfig, thinkingConfig: { thinkingLevel: "low" } }, baseConfig] : [baseConfig];
+    const configs = /^gemini-[3-9]/.test(model) ? [{ ...baseConfig, thinkingConfig: { thinkingLevel: "minimal" } }, baseConfig] : [baseConfig];
     for (const generationConfig of configs) {
       const left = deadline - Date.now();
       if (left < 5_000) { lastErr = { status: 504, message: "la IA tardó demasiado" }; break outer; }
@@ -179,7 +180,7 @@ async function handle(req: Request): Promise<Response> {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
           body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig }),
-          signal: AbortSignal.timeout(Math.min(40_000, left)),
+          signal: AbortSignal.timeout(Math.min(22_000, left)),
         });
       } catch (e) {
         lastErr = { status: 504, message: `sin respuesta de ${model} (${(e as Error).name})` };
