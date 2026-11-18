@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=3';
+import * as C from './calc.js?v=4';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -190,7 +190,7 @@ function viewAuth(mode) {
   const titles = { login: 'Iniciar sesión', registro: 'Crear cuenta', recuperar: 'Recuperar contraseña' };
   app.innerHTML = `
   <div class="auth-wrap">
-    <div class="brand"><img class="brand-logo" src="img/logo.png" alt="Amigos Fit">
+    <div class="brand"><img class="brand-logo" src="img/logo.png?v=4" alt="Amigos Fit">
       <p class="muted">Entrena, aliméntate y progresa junto a tus amigos.</p></div>
     <div class="card">
       ${mode !== 'recuperar' ? `<div class="tabs">
@@ -255,7 +255,7 @@ function translateAuthError(m = '') {
 
 function viewNewPassword() {
   nav.classList.add('hidden');
-  app.innerHTML = `<div class="auth-wrap"><div class="brand"><img class="brand-logo sm" src="img/logo.png" alt="Amigos Fit"><h1>Nueva contraseña</h1></div>
+  app.innerHTML = `<div class="auth-wrap"><div class="brand"><img class="brand-logo sm" src="img/logo.png?v=4" alt="Amigos Fit"><h1>Nueva contraseña</h1></div>
     <div class="card"><form id="f">
       <label>Nueva contraseña</label><input name="p1" type="password" minlength="6" required autocomplete="new-password">
       <label>Repetir contraseña</label><input name="p2" type="password" minlength="6" required autocomplete="new-password">
