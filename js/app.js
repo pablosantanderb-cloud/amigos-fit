@@ -625,16 +625,34 @@ async function viewProfile() {
 }
 
 // ---------------------------------------------------------------- HOY
-function ring(value, target) {
-  const R = 56, Cc = 2 * Math.PI * R;
-  const frac = target > 0 ? Math.min(1, value / target) : 0;
-  const over = value > target * 1.1;
-  const color = over ? 'var(--danger)' : 'var(--accent)';
-  return `<div class="ring"><svg width="132" height="132" viewBox="0 0 132 132">
-    <circle cx="66" cy="66" r="${R}" fill="none" stroke="var(--line)" stroke-width="12"/>
-    <circle cx="66" cy="66" r="${R}" fill="none" stroke="${color}" stroke-width="12" stroke-linecap="round"
-      stroke-dasharray="${Cc}" stroke-dashoffset="${Cc * (1 - frac)}" style="transition:stroke-dashoffset .5s"/></svg>
-    <div class="center"><div class="big">${fmt(value)}</div><div class="small muted">de ${fmt(target)} kcal</div></div></div>`;
+// Arco de calorías con rango ideal (±10% de la meta), estilo "medidor"
+const KCAL_RANGE = 0.10;
+function gauge(value, target) {
+  const lo = Math.round(target * (1 - KCAL_RANGE)), hi = Math.round(target * (1 + KCAL_RANGE));
+  const max = Math.max(target * 1.4, value * 1.05);
+  const cx = 160, cy = 200, r = 170;
+  const pt = (v) => { const f = Math.max(0, Math.min(1, v / max)); const th = (150 - 120 * f) * Math.PI / 180; return [cx + r * Math.cos(th), cy - r * Math.sin(th)]; };
+  const arc = (a, b) => { const [x1, y1] = pt(a), [x2, y2] = pt(b); return `M${x1.toFixed(1)} ${y1.toFixed(1)} A${r} ${r} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`; };
+  const tick = (v) => { const f = v / max, th = (150 - 120 * f) * Math.PI / 180, c = Math.cos(th), sn = Math.sin(th);
+    return `<line x1="${(cx + (r - 11) * c).toFixed(1)}" y1="${(cy - (r - 11) * sn).toFixed(1)}" x2="${(cx + (r + 11) * c).toFixed(1)}" y2="${(cy - (r + 11) * sn).toFixed(1)}" stroke="var(--text)" stroke-width="3" stroke-linecap="round" opacity=".75"/>
+      <text x="${(cx + (r - 30) * c).toFixed(1)}" y="${(cy - (r - 30) * sn + 4).toFixed(1)}" text-anchor="middle" class="g-lbl">${fmt(v)}</text>`; };
+  const state = value < lo ? 'under' : value <= hi ? 'in' : 'over';
+  const [mx, my] = pt(value);
+  const mark = state === 'in' ? '✓' : state === 'over' ? '!' : '';
+  const markColor = state === 'over' ? 'var(--danger)' : 'var(--accent)';
+  return `<div class="gauge">
+    <div class="g-num"><b>${fmt(value)}</b> / ${fmt(target)}<span>kcal</span></div>
+    <svg viewBox="0 18 320 108" preserveAspectRatio="xMidYMid meet" aria-label="Calorías: ${fmt(value)} de ${fmt(target)}">
+      <path d="${arc(0, max)}" fill="none" stroke="var(--line)" stroke-width="12" stroke-linecap="round"/>
+      <path d="${arc(lo, hi)}" fill="none" stroke="var(--accent)" stroke-width="12" opacity=".22"/>
+      ${value > 0 ? `<path d="${arc(0, Math.min(value, hi))}" fill="none" stroke="var(--accent)" stroke-width="12" stroke-linecap="round"/>` : ''}
+      ${value > hi ? `<path d="${arc(hi, value)}" fill="none" stroke="var(--danger)" stroke-width="12" stroke-linecap="round"/>` : ''}
+      ${tick(lo)}${tick(hi)}
+      <circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="13" fill="${value > 0 ? markColor : 'var(--line)'}" stroke="var(--card)" stroke-width="3"/>
+      ${mark ? `<text x="${mx.toFixed(1)}" y="${(my + 5).toFixed(1)}" text-anchor="middle" class="g-mark">${mark}</text>` : ''}
+    </svg>
+    <div class="g-state ${state}">${state === 'in' ? '✅ En tu rango ideal' : state === 'over' ? `⚠️ Te pasaste ${fmt(value - hi)} kcal del rango` : value > 0 ? `Faltan ${fmt(lo - value)} kcal para entrar al rango` : 'Rango ideal'} · ${fmt(lo)}–${fmt(hi)}</div>
+  </div>`;
 }
 
 function macroBar(label, value, target, color) {
@@ -685,14 +703,12 @@ async function viewToday() {
   </div>
 
   <div class="card">
-    <div class="ring-wrap">
-      ${ring(tot.kcal, target)}
-      <div class="kpis">
-        <div class="kpi"><span class="muted">Meta de ${isToday ? 'hoy' : 'este día'}</span><b>${fmt(target)}</b></div>
-        <div class="kpi"><span class="muted">Consumido</span><b>${fmt(tot.kcal)}</b></div>
-        <div class="kpi"><span class="muted">${remaining >= 0 ? 'Te quedan' : 'Te pasaste'}</span>
-          <b style="color:${remaining >= 0 ? 'var(--accent)' : 'var(--danger)'}">${fmt(Math.abs(remaining))}</b></div>
-      </div>
+    ${gauge(tot.kcal, target)}
+    <div class="kpis kpis3">
+      <div><span class="muted">Meta</span><b>${fmt(target)}</b></div>
+      <div><span class="muted">Consumido</span><b>${fmt(tot.kcal)}</b></div>
+      <div><span class="muted">${remaining >= 0 ? 'Te quedan' : 'Te pasaste'}</span>
+        <b style="color:${remaining >= 0 ? 'var(--accent)' : 'var(--danger)'}">${fmt(Math.abs(remaining))}</b></div>
     </div>
     <p class="small muted" style="margin:10px 0 0">${C.isFixedMode(P)
       ? `🎯 Meta fija = gasto promedio ${fmt(C.tdee(P))} (incluye tu ejercicio semanal promedio) − ${defTxt} objetivo. Los entrenos no la cambian.`

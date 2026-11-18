@@ -277,3 +277,18 @@ table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
 .seg2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 4px; }
 .seg2 button { border: 0; background: none; padding: 8px 2px; border-radius: 9px; color: var(--muted); font-weight: 600; cursor: pointer; }
 .seg2 button.active { background: var(--accent); color: #fff; }
+
+.gauge { text-align: center; }
+.gauge svg { width: 100%; max-width: 380px; height: auto; display: block; margin: 0 auto; overflow: visible; }
+.g-num { font-size: 1.05rem; color: var(--muted); }
+.g-num b { font-size: 1.9rem; color: var(--text); font-weight: 800; }
+.g-num span { display: block; font-size: .8rem; margin-top: -2px; }
+.g-lbl { font-size: 13px; fill: var(--muted); font-weight: 600; }
+.g-mark { font-size: 15px; font-weight: 800; fill: #fff; }
+.g-state { font-size: .85rem; margin-top: -2px; color: var(--muted); }
+.g-state.in { color: var(--accent); font-weight: 700; }
+.g-state.over { color: var(--danger); font-weight: 700; }
+.kpis3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 12px; text-align: center; }
+.kpis3 > div { background: var(--bg); border-radius: 12px; padding: 8px 4px; display: flex; flex-direction: column; gap: 2px; }
+.kpis3 span { font-size: .75rem; }
+.kpis3 b { font-size: 1.1rem; }
