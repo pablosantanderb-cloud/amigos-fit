@@ -138,24 +138,39 @@ Deno.serve(async (req) => {
   }
   if (image) parts.push({ inline_data: { mime_type: mimeType, data: image } });
 
-  const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-    {
+  // Prueba el modelo configurado y, si no existe o está saturado, alternativas de la capa gratuita.
+  const models = [...new Set([GEMINI_MODEL, "gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"])];
+  const payload = JSON.stringify({
+    contents: [{ role: "user", parts }],
+    generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: isActivity ? ACTIVITY_SCHEMA : SCHEMA },
+  });
+  let resp: Response | null = null;
+  let lastErr = { status: 0, message: "" };
+  for (const model of models) {
+    resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts }],
-        generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: isActivity ? ACTIVITY_SCHEMA : SCHEMA },
-      }),
-    },
-  );
-
-  if (!resp.ok) {
+      body: payload,
+    });
+    if (resp.ok) break;
     const detail = await resp.text();
-    console.error("Gemini error", resp.status, detail);
-    const msg = resp.status === 429
+    let message = detail.slice(0, 300);
+    try { message = JSON.parse(detail)?.error?.message ?? message; } catch { /* texto plano */ }
+    lastErr = { status: resp.status, message };
+    console.error("Gemini error", model, resp.status, message);
+    // Solo vale la pena probar otro modelo si este no existe, no está disponible o está saturado
+    if (![404, 429, 500, 503].includes(resp.status)) break;
+    resp = null;
+  }
+
+  if (!resp || !resp.ok) {
+    const msg = lastErr.status === 429
       ? "Se alcanzó el límite gratuito de análisis por minuto/día. Intenta en un rato o ingresa los valores a mano."
-      : "No se pudo analizar la foto en este momento.";
+      : lastErr.status === 400 && /API key/i.test(lastErr.message)
+      ? "La clave de Gemini no es válida. Revisa el secreto GEMINI_API_KEY."
+      : lastErr.status === 403
+      ? "Gemini rechazó la clave (403): puede que la API no esté habilitada en ese proyecto de Google."
+      : `No se pudo analizar (Gemini ${lastErr.status}): ${lastErr.message}`;
     return json({ error: msg }, 502);
   }
 
