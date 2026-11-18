@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=15';
+import * as C from './calc.js?v=16';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -51,6 +51,14 @@ function learnTxt(p) {
   if (w >= 1) return `🧠 Gasto promedio aprendido de tu reloj: ${fmt(p.learned_tdee)} kcal/día (${n} días registrados en las últimas 4 semanas). Se actualiza solo cada día.`;
   if (w > 0) return `🧠 Gasto promedio = ${Math.round(w * 100)}% lo aprendido de tu reloj (${fmt(p.learned_tdee)}, ${n} días) + ${Math.round((1 - w) * 100)}% fórmula (${formula}). Con ${C.LEARN_FULL_DAYS} días usará solo tu reloj.`;
   return `Gasto promedio: ${formula}. Ingresa el gasto total de tu reloj cada día: con ${C.LEARN_MIN_DAYS} días la meta empieza a ajustarse sola (llevas ${n}).`;
+}
+
+// Ícono redondo de color para cada tipo de entrenamiento
+function workoutIcon(name = '') {
+  const w = C.WORKOUT_TYPES.find((x) => x.name.toLowerCase() === String(name).toLowerCase())
+    || (profile?.custom_workouts || []).map((x) => ({ ...x, color: '#64748b' })).find((x) => x.name.toLowerCase() === String(name).toLowerCase());
+  const guess = /f[uú]tbol/i.test(name) ? '⚽' : /camin/i.test(name) ? '🚶' : /corr|trote/i.test(name) ? '🏃' : /bici/i.test(name) ? '🚴' : /pesa|fuerza/i.test(name) ? '🏋️' : /nata/i.test(name) ? '🏊' : '🏅';
+  return `<span class="wk-ic" style="--wc:${w?.color || '#64748b'}">${w?.icon || guess}</span>`;
 }
 
 // Llama a la función de IA y devuelve el JSON (o lanza un error legible)
@@ -719,26 +727,35 @@ async function viewToday() {
 
   <div class="card">
     <h2>🏃 Entrenamientos</h2>
-    ${(acts.data || []).map((a) => `<div class="row between food"><div class="info"><div class="name">${a.source === 'reloj' ? '⌚ ' : ''}${esc(a.activity)}</div>
-      <div class="mac">${a.minutes} min${a.kcal_burned ? ` · ${fmt(a.kcal_burned)} kcal` : ''}${a.steps ? ` · ${fmt(a.steps)} pasos` : ''}${a.distance_km ? ` · ${dec(r1(a.distance_km))} km` : ''} · ${C.isFixedMode(P) ? `~${fmt(C.activityKcal(P, a))} kcal (ya incluido en tu meta)` : `suma ${fmt(C.activityKcal(P, a))} kcal a tu meta`}</div></div>
+    ${(acts.data || []).map((a) => `<div class="row between food">${workoutIcon(a.activity)}<div class="info"><div class="name">${a.source === 'reloj' ? '⌚ ' : ''}${esc(a.activity)}</div>
+      <div class="mac">${a.source === 'manual' && a.kcal_burned ? '' : `${a.minutes} min · `}${a.kcal_burned ? `${fmt(a.kcal_burned)} kcal activas` : ''}${a.steps ? ` · ${fmt(a.steps)} pasos` : ''}${a.distance_km ? ` · ${dec(r1(a.distance_km))} km` : ''} · ${C.isFixedMode(P) ? `~${fmt(C.activityKcal(P, a))} kcal (ya incluido en tu meta)` : `suma ${fmt(C.activityKcal(P, a))} kcal a tu meta`}</div></div>
       <button class="icon-btn" data-delact="${a.id}">🗑️</button></div>`).join('') || `<p class="muted small">Sin entrenamientos ${isToday ? 'hoy' : 'este día'}.</p>`}
     <button type="button" id="aToggle" class="btn block" style="margin-top:8px">➕ Agregar entrenamiento</button>
     <div id="aPanel" class="hidden">
-      <div class="tabs" style="margin-top:10px"><button type="button" data-at="foto" class="active">📷 Desde foto</button><button type="button" data-at="manual">✍️ Manual</button></div>
-      <div id="atFoto">
+      <div class="tabs" style="margin-top:10px"><button type="button" data-at="manual" class="active">✍️ Manual</button><button type="button" data-at="foto">📷 Desde foto</button></div>
+      <div id="atFoto" class="hidden">
         <p class="small muted">Pantallazo de la app de tu reloj (Apple Fitness/Salud, Garmin, Huawei, Zepp, Samsung…). La IA lee el entreno y, si aparece, el gasto total del día.</p>
         ${photoPicker('act', 'Pantallazo del reloj', 'resumen del entrenamiento o del día')}
         <button id="actAnalyze" class="btn block" style="margin-top:8px">✨ Leer pantallazo</button>
         <div id="actResult"></div>
       </div>
-      <form id="af" class="grid2 hidden">
-        <div style="grid-column:1/-1"><label>Actividad</label><input name="activity" list="acts" required placeholder="Ej: Caminar, pesas, fútbol"></div>
-        <div><label>Minutos</label><input name="minutes" type="text" inputmode="numeric" pattern="[0-9]+" required></div>
-        <div><label>kcal (opcional)</label><input name="kcal" type="text" inputmode="numeric" pattern="[0-9]+" placeholder="del reloj"></div>
-        <div style="grid-column:1/-1"><label>Fecha</label><input name="date" type="date" value="${d}" max="${C.isoDate()}" required></div>
-        <datalist id="acts">${['Caminar', 'Correr', 'Pesas / gimnasio', 'Bicicleta', 'Natación', 'Fútbol', 'Pádel / tenis', 'Yoga / pilates', 'Baile', 'Trekking', 'Crossfit / HIIT'].map((x) => `<option value="${x}">`).join('')}</datalist>
-        <button class="btn" style="grid-column:1/-1">Guardar entrenamiento</button>
-        <p class="small muted" style="grid-column:1/-1;margin:0">Sin kcal, se estiman según minutos, tu peso e intensidad habitual.</p>
+      <form id="af">
+        <label style="margin-top:0">Tipo de entrenamiento</label>
+        <div class="wk-grid" id="wkGrid"></div>
+        <input type="hidden" name="activity" required>
+        <div id="wkNew" class="row hidden" style="margin-top:8px">
+          <input id="wkNewIcon" maxlength="4" placeholder="🏅" style="width:56px;text-align:center">
+          <input id="wkNewName" maxlength="40" placeholder="Ej: Natación, Pádel, Yoga">
+          <button type="button" class="btn sm" id="wkNewOk">Agregar</button>
+        </div>
+        <div class="grid2" style="margin-top:4px">
+          <div><label>kcal del reloj</label><input name="kcal" type="text" inputmode="numeric" pattern="[0-9]+" required placeholder="Ej: 650"></div>
+          <div><label>Tipo de kcal</label>
+            <div class="seg2"><button type="button" data-kt="active" class="active">Activas</button><button type="button" data-kt="total">Totales</button></div></div>
+        </div>
+        <p class="small muted" id="kcalHelp" style="margin:6px 0 0">Ingresa las <b>kcal activas</b> de la sesión (lo extra por moverte).</p>
+        <label>Fecha</label><input name="date" type="date" value="${d}" max="${C.isoDate()}" required>
+        <button class="btn block" style="margin-top:12px">Guardar entrenamiento</button>
       </form>
     </div>
   </div>
@@ -847,14 +864,49 @@ async function viewToday() {
     route();
   };
 
+  // --- Selector de tipo de entrenamiento (con tipos propios guardados en el perfil)
+  let kcalType = 'active';
+  const allWorkouts = () => [...C.WORKOUT_TYPES, ...(P.custom_workouts || []).map((w) => ({ ...w, met: C.metForActivity(w.name), color: '#64748b' }))];
+  const renderWk = () => {
+    const cur = $('#af').activity.value;
+    $('#wkGrid').innerHTML = allWorkouts().map((w) => `<button type="button" class="wk ${w.name === cur ? 'on' : ''}" data-wk="${esc(w.name)}">${workoutIcon(w.name)}<span>${esc(w.name)}</span></button>`).join('')
+      + '<button type="button" class="wk wk-add" id="wkAdd"><span class="wk-ic" style="--wc:#94a3b8">＋</span><span>Otro</span></button>';
+    $$('[data-wk]').forEach((b) => (b.onclick = () => { $('#af').activity.value = b.dataset.wk; renderWk(); }));
+    $('#wkAdd').onclick = () => { $('#wkNew').classList.remove('hidden'); $('#wkNewName').focus(); };
+  };
+  renderWk();
+  $('#wkNewOk').onclick = async () => {
+    const name = $('#wkNewName').value.trim();
+    if (!name) return toast('Escribe el nombre del entrenamiento', true);
+    const icon = $('#wkNewIcon').value.trim() || '🏅';
+    const list = [...(P.custom_workouts || []).filter((w) => w.name.toLowerCase() !== name.toLowerCase()), { name, icon }];
+    const { error } = await sb.from('profiles').update({ custom_workouts: list }).eq('id', uid);
+    if (error) return toast(error.message, true);
+    profile.custom_workouts = list;
+    $('#af').activity.value = name;
+    $('#wkNew').classList.add('hidden'); $('#wkNewName').value = ''; $('#wkNewIcon').value = '';
+    renderWk();
+  };
+  $$('[data-kt]').forEach((b) => (b.onclick = () => {
+    kcalType = b.dataset.kt;
+    $$('[data-kt]').forEach((x) => x.classList.toggle('active', x === b));
+    $('#kcalHelp').innerHTML = kcalType === 'active'
+      ? 'Ingresa las <b>kcal activas</b> de la sesión (lo extra por moverte).'
+      : 'Ingresaste <b>kcal totales</b>: la app les quita la parte de reposo (ya contada en tu gasto base) según el tipo de entrenamiento.';
+  }));
+
   $('#af').onsubmit = async (ev) => {
     ev.preventDefault();
     const f = Object.fromEntries(new FormData(ev.target));
-    const minutes = parseInt(f.minutes, 10);
-    if (!(minutes > 0)) return toast('Ingresa los minutos', true);
-    const { error } = await sb.from('activity_logs').insert({ log_date: f.date || d, activity: f.activity.trim(), minutes, kcal_burned: parseInt(f.kcal, 10) || null, source: 'manual' });
+    if (!f.activity) return toast('Elige el tipo de entrenamiento', true);
+    const kcalIn = parseInt(f.kcal, 10);
+    if (!(kcalIn > 0)) return toast('Ingresa las kcal del reloj', true);
+    const met = C.metForActivity(f.activity);
+    const active = kcalType === 'total' ? C.totalToActive(kcalIn, met) : kcalIn;
+    const minutes = Math.max(1, Math.round(active / C.kcalPerMinAt(P, met))); // estimado, para el ranking de actividad
+    const { error } = await sb.from('activity_logs').insert({ log_date: f.date || d, activity: f.activity, minutes, kcal_burned: active, source: 'manual' });
     if (error) return toast(error.message, true);
-    toast(f.date && f.date !== d ? `Actividad registrada el ${shortDate(f.date)} 💪` : 'Actividad registrada 💪');
+    toast(kcalType === 'total' ? `Guardado: ${fmt(kcalIn)} kcal totales = ${fmt(active)} activas 💪` : f.date && f.date !== d ? `Entrenamiento registrado el ${shortDate(f.date)} 💪` : 'Entrenamiento registrado 💪');
     route();
   };
 

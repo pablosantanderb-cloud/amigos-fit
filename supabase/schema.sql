@@ -128,6 +128,8 @@ alter table public.profiles add column if not exists tutorial_done boolean defau
 
 alter table public.profiles add column if not exists target_mode text default 'dynamic' check (target_mode in ('dynamic','average'));
 
+alter table public.profiles add column if not exists custom_workouts jsonb default '[]'::jsonb;
+
 -- ---------- GRUPOS ----------
 create table if not exists public.groups (
   id          uuid primary key default gen_random_uuid(),
