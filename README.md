@@ -30,7 +30,7 @@ dev/                           → mock para probar la UI sin backend
 ### 2. Clave de Gemini (gratis)
 1. https://aistudio.google.com/apikey → **Create API key**.
 2. En Supabase: **Edge Functions → Secrets** → agregar `GEMINI_API_KEY` = la clave.
-   (Opcional: `GEMINI_MODEL` para cambiar de modelo; por defecto `gemini-2.5-flash`.)
+   (Opcional: `GEMINI_MODEL` para fijar un modelo; si no, usa el "flash" más nuevo disponible.)
 
 ### 3. Función de análisis de fotos
 En Supabase: **Edge Functions → Deploy a new function → Via Editor** → nombre `analyze-food` → pegar

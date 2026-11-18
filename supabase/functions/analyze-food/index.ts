@@ -4,7 +4,7 @@
 // La función verifica en el código que el usuario tenga sesión iniciada ("Verify JWT" desactivado en el panel).
 
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
-const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -101,6 +101,29 @@ const ACTIVITY_SCHEMA = {
   required: ["activities", "day_totals"],
 };
 
+// Lista de modelos "flash" disponibles para esta clave, ordenados del más nuevo al más antiguo (cache 6 h).
+let modelCache: { at: number; list: string[] } | null = null;
+async function flashModels(): Promise<string[]> {
+  if (modelCache && Date.now() - modelCache.at < 6 * 3600_000) return modelCache.list;
+  try {
+    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { headers: { "x-goog-api-key": GEMINI_API_KEY } });
+    if (!r.ok) throw new Error(String(r.status));
+    const { models = [] } = await r.json();
+    const ver = (n: string) => Number(n.match(/gemini-(\d+(?:\.\d+)?)/)?.[1] ?? 0);
+    const list = (models as { name: string; supportedGenerationMethods?: string[] }[])
+      .filter((m) => m.supportedGenerationMethods?.includes("generateContent"))
+      .map((m) => m.name.replace(/^models\//, ""))
+      .filter((n) => /^gemini-\d+(\.\d+)?-flash$/.test(n) || /^gemini-\d+(\.\d+)?-flash-lite$/.test(n))
+      .sort((a, b) => ver(b) - ver(a) || Number(a.includes("lite")) - Number(b.includes("lite")));
+    modelCache = { at: Date.now(), list };
+    console.log("Modelos flash disponibles:", list.join(", "));
+    return list;
+  } catch (e) {
+    console.error("No se pudo listar modelos", e);
+    return ["gemini-3.8-flash"];
+  }
+}
+
 // Verifica que quien llama sea un usuario con sesión iniciada (no basta la clave pública).
 async function getUserId(req: Request): Promise<string | null> {
   const auth = req.headers.get("Authorization") ?? "";
@@ -138,8 +161,9 @@ Deno.serve(async (req) => {
   }
   if (image) parts.push({ inline_data: { mime_type: mimeType, data: image } });
 
-  // Prueba el modelo configurado y, si no existe o está saturado, alternativas de la capa gratuita.
-  const models = [...new Set([GEMINI_MODEL, "gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"])];
+  // Prueba el modelo configurado y luego los "flash" que Google tenga disponibles (del más nuevo al más antiguo),
+  // así la app sigue funcionando cuando Google retira modelos.
+  const models = [...new Set([...(Deno.env.get("GEMINI_MODEL") ? [GEMINI_MODEL] : []), ...(await flashModels()), "gemini-flash-latest"])].slice(0, 5);
   const payload = JSON.stringify({
     contents: [{ role: "user", parts }],
     generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: isActivity ? ACTIVITY_SCHEMA : SCHEMA },
