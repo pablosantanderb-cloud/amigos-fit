@@ -74,6 +74,41 @@ const photoPicker = (id, title, sub) => `
     <div id="${id}-ph"><div style="font-size:2.2rem">📷</div><div><b>${title}</b></div><div class="small">${sub}</div></div>
   </div>
   <label class="btn ghost block" style="margin:8px 0 0">📷 Cargar foto<input id="${id}-gal" type="file" accept="image/*" class="vh"></label>`;
+// Varias fotos (hasta "limit"): miniaturas con ✕ y botón para agregar más
+const MAX_FOOD_PHOTOS = 4;
+const multiPhotoPicker = (id, title, sub) => `
+  <div class="photo-drop" id="${id}-drop">
+    <div id="${id}-ph"><div style="font-size:2.2rem">📷</div><div><b>${title}</b></div><div class="small">${sub}</div></div>
+  </div>
+  <div class="thumbs hidden" id="${id}-thumbs"></div>
+  <label class="btn ghost block" style="margin:8px 0 0" id="${id}-add">📷 Cargar foto<input id="${id}-gal" type="file" accept="image/*" multiple class="vh"></label>`;
+function bindMultiPhotoPicker(id, onChange, max, limit = MAX_FOOD_PHOTOS) {
+  let list = [];
+  const render = () => {
+    const thumbs = $(`#${id}-thumbs`);
+    $(`#${id}-drop`).classList.toggle('hidden', list.length > 0);
+    thumbs.classList.toggle('hidden', list.length === 0);
+    thumbs.innerHTML = list.map((img, i) => `<div class="thumb"><img src="${img.dataUrl}" alt="foto ${i + 1}"><button type="button" data-rmph="${i}" aria-label="Quitar foto">✕</button></div>`).join('');
+    $$(`#${id}-thumbs [data-rmph]`).forEach((b) => (b.onclick = () => { list.splice(+b.dataset.rmph, 1); render(); }));
+    const add = $(`#${id}-add`);
+    add.classList.toggle('hidden', list.length >= limit);
+    add.firstChild.textContent = list.length ? `📷 Agregar otra foto (${list.length}/${limit})` : '📷 Cargar foto';
+    onChange(list);
+  };
+  $(`#${id}-gal`).onchange = async (ev) => {
+    const files = [...(ev.target.files || [])];
+    ev.target.value = '';
+    if (!files.length) return;
+    const room = limit - list.length;
+    if (files.length > room) toast(`Máximo ${limit} fotos: se agregaron ${room}`, true);
+    for (const f of files.slice(0, room)) {
+      try { list.push(await resizeImage(f, max)); } catch (e) { toast(e.message, true); }
+    }
+    render();
+  };
+  $(`#${id}-drop`).onclick = () => $(`#${id}-gal`).click();
+}
+
 function bindPhotoPicker(id, onPick, max) {
   const handler = async (ev) => {
     const file = ev.target.files?.[0];
@@ -901,7 +936,7 @@ async function resizeImage(file, max = 1024, quality = 0.82) {
 }
 
 async function viewRegister() {
-  let photo = null; // { blob, dataUrl, base64 }
+  let photos = []; // [{ blob, dataUrl, base64 }] hasta 4
   let items = [];
   let meta = { description: '', confidence: null, notes: '' };
 
@@ -912,8 +947,8 @@ async function viewRegister() {
     <div class="seg" id="mealSeg">${Object.entries(MEALS).map(([k, v]) => `<button type="button" data-meal="${k}" class="${k === defaultMeal() ? 'active' : ''}">${v}</button>`).join('')}</div>
     <input id="meal" type="hidden" value="${defaultMeal()}">
     <label>Fecha</label><input id="date" type="date" value="${state.date}" max="${C.isoDate()}">
-    <label>Foto (recomendada)</label>
-    ${photoPicker('food', 'Foto del plato', 'la foto mejora la estimación de porciones')}
+    <label>Fotos (recomendado · hasta 4)</label>
+    ${multiPhotoPicker('food', 'Fotos del plato (hasta 4)', 'varios ángulos o cada parte de la comida mejoran la estimación')}
     <label>¿Qué comiste? <span class="muted">(obligatorio si no hay foto)</span></label>
     <textarea id="comment" maxlength="500" placeholder="Ej: 2 huevos duros y una marraqueta con palta. Con foto puedes agregar detalles: 'le eché 1 cucharada de aceite', 'me comí la mitad'."></textarea>
     <button id="analyze" class="btn block" style="margin-top:12px">✨ Analizar con IA</button>
@@ -921,7 +956,7 @@ async function viewRegister() {
   </div>
   <div id="result"></div>`;
 
-  bindPhotoPicker('food', (img) => { photo = img; }, 1024);
+  bindMultiPhotoPicker('food', (list) => { photos = list; }, 1024);
   $$('#mealSeg button').forEach((b) => (b.onclick = () => {
     $$('#mealSeg button').forEach((x) => x.classList.toggle('active', x === b));
     $('#meal').value = b.dataset.meal;
@@ -969,10 +1004,10 @@ async function viewRegister() {
 
   $('#analyze').onclick = async () => {
     const comment = $('#comment').value.trim();
-    if (!photo && !comment) { $('#comment').focus(); return toast('Toma una foto o escribe qué comiste (ej: "Huevo duro")', true); }
+    if (!photos.length && !comment) { $('#comment').focus(); return toast('Toma una foto o escribe qué comiste (ej: "Huevo duro")', true); }
     const btn = $('#analyze'); busy(btn, true, 'Analizando…');
     try {
-      const data = await callAI({ image: photo?.base64, mimeType: 'image/jpeg', comment, meal: MEALS[$('#meal').value] });
+      const data = await callAI({ images: photos.map((x) => x.base64), mimeType: 'image/jpeg', comment, meal: MEALS[$('#meal').value] });
       items = (data.items || []).map((it) => ({ ...it }));
       meta = { description: data.description || '', confidence: data.confidence, notes: data.notes || '' };
       if (!items.length) { toast(data.notes || 'No se reconoció comida en la imagen', true); items = [{ name: '', kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }]; }
@@ -989,9 +1024,9 @@ async function viewRegister() {
       if (!valid.length) throw new Error('Agrega al menos un alimento');
       const tot = C.sumLogs(valid);
       let photo_path = null;
-      if (photo) {
+      if (photos.length) { // se guarda la primera foto como miniatura del registro
         photo_path = `${session.user.id}/${Date.now()}.jpg`;
-        const { error } = await sb.storage.from('food-photos').upload(photo_path, photo.blob, { contentType: 'image/jpeg' });
+        const { error } = await sb.storage.from('food-photos').upload(photo_path, photos[0].blob, { contentType: 'image/jpeg' });
         if (error) { console.warn('No se pudo subir la foto', error); photo_path = null; }
       }
       const date = $('#date').value || state.date;

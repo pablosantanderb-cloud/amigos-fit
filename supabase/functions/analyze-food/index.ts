@@ -142,13 +142,14 @@ async function handle(req: Request): Promise<Response> {
   if (!(await getUserId(req))) return json({ error: "Debes iniciar sesión" }, 401);
   if (!GEMINI_API_KEY) return json({ error: "Falta configurar el secreto GEMINI_API_KEY en Supabase" }, 500);
 
-  let body: { image?: string; mimeType?: string; comment?: string; meal?: string; mode?: string; today?: string; viewing?: string };
+  let body: { image?: string; images?: string[]; mimeType?: string; comment?: string; meal?: string; mode?: string; today?: string; viewing?: string };
   try { body = await req.json(); } catch { return json({ error: "JSON inválido" }, 400); }
 
   const { image, mimeType = "image/jpeg", comment = "", meal = "", mode = "food", today = "", viewing = "" } = body;
+  const images = (Array.isArray(body.images) ? body.images : image ? [image] : []).filter((x) => typeof x === "string" && x).slice(0, 4);
   const isActivity = mode === "activity";
-  if (isActivity ? !image : !image && !comment.trim()) return json({ error: isActivity ? "Envía un pantallazo" : "Envía una foto o un comentario" }, 400);
-  if (image && image.length > 4_000_000) return json({ error: "Imagen demasiado grande" }, 413);
+  if (isActivity ? !images.length : !images.length && !comment.trim()) return json({ error: isActivity ? "Envía un pantallazo" : "Envía una foto o un comentario" }, 400);
+  if (images.reduce((a, x) => a + x.length, 0) > 8_000_000) return json({ error: "Imágenes demasiado grandes" }, 413);
 
   const parts: unknown[] = [];
   if (isActivity) {
@@ -158,9 +159,10 @@ async function handle(req: Request): Promise<Response> {
   } else {
     parts.push({ text: PROMPT });
     if (meal) parts.push({ text: `Comida del día: ${meal}.` });
+    if (images.length > 1) parts.push({ text: `Se adjuntan ${images.length} fotos de la MISMA comida (distintos ángulos o distintas partes). Combínalas para estimar mejor las porciones y NO cuentes dos veces un alimento que aparece en más de una foto.` });
     if (comment.trim()) parts.push({ text: `Comentario del usuario: """${comment.slice(0, 1000)}"""` });
   }
-  if (image) parts.push({ inline_data: { mime_type: mimeType, data: image } });
+  for (const img of images) parts.push({ inline_data: { mime_type: mimeType, data: img } });
 
   // Modelos medidos con una foto real (nov-2026): 3.5-flash-lite y 3.1-flash-lite responden en ~3-4 s con buena
   // calidad; gemini-3.8-flash tardó >60 s. Primero los rápidos conocidos y, si Google los retira, los "lite"/"flash"
