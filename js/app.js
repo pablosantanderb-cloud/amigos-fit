@@ -1423,26 +1423,48 @@ function renderMacroCompare(rows, error) {
     return Math.abs(pctv - 100) <= 10 ? 'mc-g' : Math.abs(pctv - 100) <= 20 ? 'mc-y' : 'mc-r';
   };
   const people = rows.filter((r) => r.days_logged > 0);
+  const calc = (r, m) => {
+    const avg = Number(r[m.avg]) || 0, tgt = Number(r[m.tgt]) || 0;
+    const pv = tgt ? Math.round((avg / tgt) * 100) : 0;
+    const diff = Math.round(avg - tgt);
+    const txt = m.mode === 'min'
+      ? (diff >= 0 ? 'cumplió' : `faltan ${fmt(-diff)} ${m.unit}/día`)
+      : m.mode === 'max'
+      ? (diff <= 0 ? 'dentro' : `+${fmt(diff)} ${m.unit}/día de más`)
+      : (Math.abs(diff) <= tgt * 0.1 ? 'en meta' : `${diff > 0 ? '+' : '−'}${fmt(Math.abs(diff))} kcal/día`);
+    return { pv, txt, st: status(m.mode, pv) };
+  };
+  const bar = (label, c) => `<div class="mc-row"><span class="mc-l">${label}</span>
+    <div class="mc-bar"><i class="${c.st}" style="width:${Math.min(100, c.pv / 1.5)}%"></i><em></em></div>
+    <span class="mc-v ${c.st}">${c.pv}%</span><span class="mc-t">${c.txt}</span></div>`;
+  const who = (r) => `${esc(r.display_name)}${r.user_id === session.user.id ? ' (tú)' : ''}`;
+  const view = state.mcView || 'macro';
+  const mk = state.mcMacro || 'kcal';
+
+  let body;
+  if (!people.length) body = '<p class="small muted">Aún nadie registra comidas en este período.</p>';
+  else if (view === 'macro') {
+    const m = M.find((x) => x.k === mk);
+    // orden: proteína (más es mejor), carbos/grasas (menos exceso es mejor), calorías (más cerca de 100%)
+    const score = (c) => (m.mode === 'min' ? -Math.min(c.pv, 120) : m.mode === 'max' ? Math.max(c.pv, 100) : Math.abs(c.pv - 100));
+    const list = people.map((r) => ({ r, c: calc(r, m) })).sort((a, b) => score(a.c) - score(b.c));
+    const medal = (i) => ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
+    body = `<div class="seg mc-seg">${M.map((x) => `<button type="button" data-mck="${x.k}" class="${x.k === mk ? 'active' : ''}">${x.label === 'Carbohidratos' ? 'Carbos' : x.label}</button>`).join('')}</div>
+      <div class="mc-macro">${list.map(({ r, c }, i) => bar(`${medal(i)} ${who(r)}`, c)).join('')}</div>
+      <p class="small muted">${m.mode === 'min' ? 'Proteína: llegar a 100% o más es lo ideal.' : m.mode === 'max' ? `${m.label}: idealmente no pasar de 100%.` : 'Calorías: lo ideal es estar cerca de 100% (±10%).'}</p>`;
+  } else {
+    body = people.map((r) => `<div class="mc-person">
+      <div class="row between"><b>${who(r)}</b><span class="small muted">${r.days_logged} ${r.days_logged === 1 ? 'día' : 'días'}</span></div>
+      ${M.map((m) => bar(m.label, calc(r, m))).join('')}</div>`).join('');
+  }
+
   box.innerHTML = `<h2>🥗 Macros vs el objetivo de cada uno</h2>
     <p class="small muted">Promedio por día registrado (últimos ${state.groupRange} días). 100% = cumplió su propia meta; la línea marca el objetivo.</p>
-    ${people.length ? people.map((r) => `<div class="mc-person">
-      <div class="row between"><b>${esc(r.display_name)}${r.user_id === session.user.id ? ' <span class="small muted">(tú)</span>' : ''}</b><span class="small muted">${r.days_logged} ${r.days_logged === 1 ? 'día' : 'días'}</span></div>
-      ${M.map((m) => {
-        const avg = Number(r[m.avg]) || 0, tgt = Number(r[m.tgt]) || 0;
-        const pv = tgt ? Math.round((avg / tgt) * 100) : 0;
-        const diff = Math.round(avg - tgt);
-        const st = status(m.mode, pv);
-        const txt = m.mode === 'min'
-          ? (diff >= 0 ? 'cumplió' : `faltan ${fmt(-diff)} ${m.unit}/día`)
-          : m.mode === 'max'
-          ? (diff <= 0 ? 'dentro' : `+${fmt(diff)} ${m.unit}/día de más`)
-          : (Math.abs(diff) <= tgt * 0.1 ? 'en meta' : `${diff > 0 ? '+' : '−'}${fmt(Math.abs(diff))} kcal/día`);
-        return `<div class="mc-row"><span class="mc-l">${m.label}</span>
-          <div class="mc-bar"><i class="${st}" style="width:${Math.min(100, pv / 1.5)}%"></i><em></em></div>
-          <span class="mc-v ${st}">${pv}%</span><span class="mc-t">${txt}</span></div>`;
-      }).join('')}
-    </div>`).join('') : '<p class="small muted">Aún nadie registra comidas en este período.</p>'}
-    <p class="small muted">🟢 en meta · 🟡 cerca · 🔴 lejos. Proteína: mientras más cerca de 100% mejor (o más). Carbohidratos y grasas: idealmente no pasar de 100%.</p>`;
+    <div class="tabs" style="margin:8px 0"><button type="button" data-mcv="macro" class="${view === 'macro' ? 'active' : ''}">Por macro</button><button type="button" data-mcv="persona" class="${view === 'persona' ? 'active' : ''}">Por persona</button></div>
+    ${body}
+    <p class="small muted">🟢 en meta · 🟡 cerca · 🔴 lejos.</p>`;
+  $$('#macroCmp [data-mcv]').forEach((b) => (b.onclick = () => { state.mcView = b.dataset.mcv; renderMacroCompare(rows, null); }));
+  $$('#macroCmp [data-mck]').forEach((b) => (b.onclick = () => { state.mcMacro = b.dataset.mck; renderMacroCompare(rows, null); }));
 }
 
 async function viewFriends() {
