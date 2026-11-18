@@ -71,7 +71,7 @@ export const WORKOUT_TYPES = [
   { slug: 'hiit', name: 'Intervalos (HIIT)', icon: '⏱️', met: 9, color: '#dc2626' },
 ];
 // Íconos propios disponibles en img/workouts/<slug>.png (se agregan aquí al subirlos; mientras, se usa el emoji)
-export const WORKOUT_ICON_FILES = new Set([]);
+export const WORKOUT_ICON_FILES = new Set(['futbol', 'caminata', 'trote', 'bicicleta', 'senderismo', 'eliptica', 'funcional', 'fuerza', 'hiit']);
 
 /** Convierte kcal TOTALES de una sesión a ACTIVAS: quita la parte de reposo (1 MET) según la intensidad */
 export function totalToActive(totalKcal, met) {

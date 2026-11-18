@@ -321,3 +321,4 @@ table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
 .steps { padding-left: 20px; margin: 8px 0; }
 .steps li { margin: 6px 0; }
 .steps code { font-size: .8rem; }
+.wk-img { width: 40px; height: 40px; }

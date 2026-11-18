@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=17';
+import * as C from './calc.js?v=18';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -989,7 +989,7 @@ async function viewToday() {
       ? `${workoutIcon(cur)}<span>${esc(cur)}</span><i>▾</i>`
       : '<span class="wk-ph">Elige el tipo de entrenamiento</span><i>▾</i>';
     $('#wkMenu').innerHTML = allWorkouts().map((w) => `<button type="button" class="wk-opt ${w.name === cur ? 'on' : ''}" data-wk="${esc(w.name)}">${workoutIcon(w.name)}<span>${esc(w.name)}</span>${w.name === cur ? '<b>✓</b>' : ''}</button>`).join('')
-      + '<button type="button" class="wk-opt wk-add" id="wkAdd"><span class="wk-ic" style="--wc:#94a3b8">＋</span><span>Agregar otro tipo…</span></button>';
+      + '<button type="button" class="wk-opt wk-add" id="wkAdd"><img class="wk-img" src="img/workouts/agregar.png?v=1" alt=""><span>Agregar otro tipo…</span></button>';
     $$('[data-wk]').forEach((b) => (b.onclick = () => { $('#af').activity.value = b.dataset.wk; $('#wkMenu').classList.add('hidden'); renderWk(); }));
     $('#wkAdd').onclick = () => { $('#wkMenu').classList.add('hidden'); $('#wkNew').classList.remove('hidden'); $('#wkNewName').focus(); };
   };
