@@ -309,6 +309,7 @@ function addEyes(root = document) {
     b.className = 'pw-eye';
     b.setAttribute('aria-label', 'Mostrar contraseña');
     b.textContent = '👁️';
+    b.addEventListener('mousedown', (e) => e.preventDefault()); // no quitar el foco del campo
     b.onclick = () => {
       const show = inp.type === 'password';
       inp.type = show ? 'text' : 'password';

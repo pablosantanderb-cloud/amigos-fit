@@ -240,6 +240,6 @@ table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
 .tut-card { border: 1px solid var(--line); }
 @media (prefers-color-scheme: dark) { .tut-card { background: #1f2834; border-color: #334155; } }
 
-.pw { position: relative; flex: 1; }
-.pw input { padding-right: 46px; }
-.pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: none; border: 0; font-size: 1.15rem; padding: 6px 8px; cursor: pointer; line-height: 1; }
+.pw { display: flex; gap: 8px; align-items: stretch; flex: 1; }
+.pw input { flex: 1; min-width: 0; }
+.pw-eye { flex: none; width: 48px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 1.2rem; cursor: pointer; line-height: 1; -webkit-tap-highlight-color: transparent; }
