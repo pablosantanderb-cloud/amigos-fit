@@ -60,6 +60,11 @@ export function createClient() {
       if (fn === 'group_weight_series') return { data: [0,7,14,21].flatMap((n,i)=>[
         { user_id: uid, display_name: 'Pablo', log_date: day(-21+n), pct_change: -0.6*i },
         { user_id: 'u2', display_name: 'Camila', log_date: day(-21+n), pct_change: 0.5*i }]), error: null };
+      if (fn === 'group_macros') return { data: [
+        { user_id: uid, display_name: 'Pablo', days_logged: 6, avg_kcal: 2050, avg_protein: 120, avg_carbs: 260, avg_fat: 72, kcal_target: 2133, protein_target: 151, carbs_target: 250, fat_target: 59 },
+        { user_id: 'u2', display_name: 'Luchin', days_logged: 7, avg_kcal: 1800, avg_protein: 140, avg_carbs: 190, avg_fat: 50, kcal_target: 1846, protein_target: 138, carbs_target: 209, fat_target: 51 },
+        { user_id: 'u3', display_name: 'El kacho', days_logged: 3, avg_kcal: 2500, avg_protein: 85, avg_carbs: 330, avg_fat: 75, kcal_target: 2044, protein_target: 120, carbs_target: 290, fat_target: 45 },
+      ], error: null };
       if (fn === 'create_group' || fn === 'join_group') return { data: db.groups[0], error: null };
     },
     storage: { from: () => ({ createSignedUrls: async () => ({ data: [] }), upload: async () => ({ error: null }), remove: async () => ({}) }) },

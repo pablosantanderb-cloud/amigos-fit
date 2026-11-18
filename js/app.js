@@ -1207,6 +1207,46 @@ async function viewProgress() {
 }
 
 // ---------------------------------------------------------------- AMIGOS
+// Comparación de macros: cada valor como % del objetivo de CADA persona (100% = cumplió), porque las metas son distintas.
+function renderMacroCompare(rows, error) {
+  const box = $('#macroCmp');
+  if (!box) return;
+  if (error) { box.innerHTML = `<p class="err">${esc(error.message)}</p>`; return; }
+  const M = [
+    { k: 'kcal', label: 'Calorías', unit: 'kcal', avg: 'avg_kcal', tgt: 'kcal_target', mode: 'range' },
+    { k: 'p', label: 'Proteína', unit: 'g', avg: 'avg_protein', tgt: 'protein_target', mode: 'min' },
+    { k: 'c', label: 'Carbohidratos', unit: 'g', avg: 'avg_carbs', tgt: 'carbs_target', mode: 'max' },
+    { k: 'f', label: 'Grasas', unit: 'g', avg: 'avg_fat', tgt: 'fat_target', mode: 'max' },
+  ];
+  // estado: ok (verde), warn (amarillo), bad (rojo)
+  const status = (mode, pctv) => {
+    if (mode === 'min') return pctv >= 90 ? 'mc-g' : pctv >= 75 ? 'mc-y' : 'mc-r';
+    if (mode === 'max') return pctv <= 110 ? 'mc-g' : pctv <= 130 ? 'mc-y' : 'mc-r';
+    return Math.abs(pctv - 100) <= 10 ? 'mc-g' : Math.abs(pctv - 100) <= 20 ? 'mc-y' : 'mc-r';
+  };
+  const people = rows.filter((r) => r.days_logged > 0);
+  box.innerHTML = `<h2>🥗 Macros vs el objetivo de cada uno</h2>
+    <p class="small muted">Promedio por día registrado (últimos ${state.groupRange} días). 100% = cumplió su propia meta; la línea marca el objetivo.</p>
+    ${people.length ? people.map((r) => `<div class="mc-person">
+      <div class="row between"><b>${esc(r.display_name)}${r.user_id === session.user.id ? ' <span class="small muted">(tú)</span>' : ''}</b><span class="small muted">${r.days_logged} ${r.days_logged === 1 ? 'día' : 'días'}</span></div>
+      ${M.map((m) => {
+        const avg = Number(r[m.avg]) || 0, tgt = Number(r[m.tgt]) || 0;
+        const pv = tgt ? Math.round((avg / tgt) * 100) : 0;
+        const diff = Math.round(avg - tgt);
+        const st = status(m.mode, pv);
+        const txt = m.mode === 'min'
+          ? (diff >= 0 ? 'cumplió' : `faltan ${fmt(-diff)} ${m.unit}/día`)
+          : m.mode === 'max'
+          ? (diff <= 0 ? 'dentro' : `+${fmt(diff)} ${m.unit}/día de más`)
+          : (Math.abs(diff) <= tgt * 0.1 ? 'en meta' : `${diff > 0 ? '+' : '−'}${fmt(Math.abs(diff))} kcal/día`);
+        return `<div class="mc-row"><span class="mc-l">${m.label}</span>
+          <div class="mc-bar"><i class="${st}" style="width:${Math.min(100, pv / 1.5)}%"></i><em></em></div>
+          <span class="mc-v ${st}">${pv}%</span><span class="mc-t">${txt}</span></div>`;
+      }).join('')}
+    </div>`).join('') : '<p class="small muted">Aún nadie registra comidas en este período.</p>'}
+    <p class="small muted">🟢 en meta · 🟡 cerca · 🔴 lejos. Proteína: mientras más cerca de 100% mejor (o más). Carbohidratos y grasas: idealmente no pasar de 100%.</p>`;
+}
+
 async function viewFriends() {
   const { data: groups, error } = await sb.from('groups').select('id,name,invite_code,created_by').order('created_at');
   if (error) throw error;
@@ -1227,6 +1267,7 @@ async function viewFriends() {
   </div>
   <div class="tabs">${[7, 30].map((r) => `<button data-r="${r}" class="${state.groupRange === r ? 'active' : ''}">Últimos ${r} días</button>`).join('')}</div>
   <div class="card" id="board"><div class="loading">Calculando ranking…</div></div>
+  <div class="card" id="macroCmp"><div class="loading">Comparando macros…</div></div>
   <div class="card"><h2>📉 Cambio de peso vs su punto de partida</h2>
     <p class="small muted">En % respecto del peso inicial de cada uno, para comparar de forma justa.</p>
     <div class="chart-box"><canvas id="cGroup"></canvas></div></div>
@@ -1282,10 +1323,12 @@ async function viewFriends() {
 
   const to = C.isoDate();
   const from = C.addDays(to, -(state.groupRange - 1));
-  const [lb, series] = await Promise.all([
+  const [lb, series, mc] = await Promise.all([
     sb.rpc('group_leaderboard', { gid: g.id, p_from: from, p_to: to }),
     sb.rpc('group_weight_series', { gid: g.id, p_from: C.addDays(to, -89), p_to: to }),
+    sb.rpc('group_macros', { gid: g.id, p_from: from, p_to: to }),
   ]);
+  renderMacroCompare(mc.data || [], mc.error);
   if (lb.error) { $('#board').innerHTML = `<p class="err">${esc(lb.error.message)}</p>`; return; }
   const rows = lb.data || [];
 
