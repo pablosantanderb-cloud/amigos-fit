@@ -5,16 +5,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Amigos Fit</title>
   <meta name="description" content="Entrena, aliméntate y progresa junto a tus amigos." />
-  <meta name="theme-color" content="#16a34a" />
+  <meta name="theme-color" content="#ffffff" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Amigos Fit" />
   <link rel="manifest" href="manifest.json" />
-  <link rel="icon" href="icon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="icon" href="favicon.ico" sizes="any" />
+  <link rel="icon" href="img/favicon-32.png" type="image/png" sizes="32x32" />
+  <link rel="icon" href="img/favicon-64.png" type="image/png" sizes="64x64" />
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Amigos Fit" />
+  <meta property="og:description" content="Entrena, aliméntate y progresa junto a tus amigos." />
+  <meta property="og:image" content="https://pablosantanderb-cloud.github.io/amigos-fit/img/og.png" />
+  <meta property="og:url" content="https://pablosantanderb-cloud.github.io/amigos-fit/" />
+  <meta name="twitter:card" content="summary_large_image" />
   <link rel="stylesheet" href="/css/styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
 </head>
 <body>
+  <header id="topbar" class="topbar hidden"><a href="#/hoy"><img src="/img/icon-192.png" alt="" width="34" height="34"><span>Amigos <b>Fit</b></span></a></header>
   <div id="app"><div class="loading">Cargando…</div></div>
   <nav id="nav" class="bottom-nav hidden">
     <a href="#/hoy" data-route="hoy"><span>🍽️</span>Hoy</a>

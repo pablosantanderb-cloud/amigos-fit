@@ -7,6 +7,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const app = $('#app');
 const nav = $('#nav');
+const topbar = $('#topbar');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const r0 = (n) => Math.round(Number(n) || 0);
 const r1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
@@ -15,8 +16,8 @@ const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
 const BASE_URL = location.origin + location.pathname;
 
 const MEALS = { desayuno: 'Desayuno', almuerzo: 'Almuerzo', colacion: 'Colación', cena: 'Cena', otro: 'Otros / bebidas' };
-const COLORS = { kcal: '#16a34a', prot: '#2563eb', carb: '#d97706', fat: '#db2777', target: '#6b7280' };
-const PALETTE = ['#16a34a', '#2563eb', '#db2777', '#d97706', '#7c3aed', '#0891b2', '#dc2626', '#65a30d', '#c026d3', '#0f766e'];
+const COLORS = { kcal: '#199407', prot: '#2563eb', carb: '#d97706', fat: '#db2777', target: '#6b7280' };
+const PALETTE = ['#199407', '#2563eb', '#db2777', '#d97706', '#7c3aed', '#0891b2', '#dc2626', '#65a30d', '#c026d3', '#0f766e'];
 
 function toast(msg, isError = false) {
   const t = $('#toast');
@@ -111,6 +112,7 @@ async function route() {
   clearCharts();
   const name = (location.hash.replace(/^#\/?/, '').split('?')[0] || 'hoy');
 
+  topbar.classList.toggle('hidden', !session || recoveryMode);
   if (recoveryMode && session) return viewNewPassword();
   if (!session) { nav.classList.add('hidden'); return viewAuth(['registro', 'recuperar'].includes(name) ? name : 'login'); }
 
@@ -134,7 +136,7 @@ function viewAuth(mode) {
   const titles = { login: 'Iniciar sesión', registro: 'Crear cuenta', recuperar: 'Recuperar contraseña' };
   app.innerHTML = `
   <div class="auth-wrap">
-    <div class="brand"><div class="logo">💪</div><h1>Amigos Fit</h1>
+    <div class="brand"><img class="brand-logo" src="img/logo.png" alt="Amigos Fit">
       <p class="muted">Entrena, aliméntate y progresa junto a tus amigos.</p></div>
     <div class="card">
       ${mode !== 'recuperar' ? `<div class="tabs">
@@ -199,7 +201,7 @@ function translateAuthError(m = '') {
 
 function viewNewPassword() {
   nav.classList.add('hidden');
-  app.innerHTML = `<div class="auth-wrap"><div class="brand"><div class="logo">🔑</div><h1>Nueva contraseña</h1></div>
+  app.innerHTML = `<div class="auth-wrap"><div class="brand"><img class="brand-logo sm" src="img/logo.png" alt="Amigos Fit"><h1>Nueva contraseña</h1></div>
     <div class="card"><form id="f">
       <label>Nueva contraseña</label><input name="p1" type="password" minlength="6" required autocomplete="new-password">
       <label>Repetir contraseña</label><input name="p2" type="password" minlength="6" required autocomplete="new-password">

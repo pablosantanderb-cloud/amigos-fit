@@ -70,3 +70,8 @@ Así funcionan los links de confirmación de cuenta y de **recuperar contraseña
   **El proyecto se pausa tras 7 días sin uso** (se reactiva desde el panel).
 - Gemini gratis: límite de solicitudes por minuto/día (de sobra para un grupo de amigos). En la capa gratuita
   Google puede usar los datos enviados para mejorar sus productos.
+
+## Correos en español con el logo
+Supabase → **Authentication → Emails → Templates**:
+- *Confirm signup* → Subject `Confirma tu cuenta de Amigos Fit` → pegar `supabase/email-templates/confirmar-cuenta.html`
+- *Reset password* → Subject `Restablece tu contraseña de Amigos Fit` → pegar `supabase/email-templates/recuperar-contrasena.html`
