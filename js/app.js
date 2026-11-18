@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=11';
+import * as C from './calc.js?v=12';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -556,8 +556,8 @@ async function viewToday() {
           <b style="color:${remaining >= 0 ? 'var(--accent)' : 'var(--danger)'}">${fmt(Math.abs(remaining))}</b></div>
       </div>
     </div>
-    <p class="small muted" style="margin:10px 0 0">🎯 Meta = gasto de ${isToday ? 'hoy' : 'este día'} ${fmt(spent.kcal)} − ${defTxt} objetivo.
-      ${spent.source === 'reloj' ? 'Gasto según tu reloj.' : actKcal ? `Incluye ${fmt(actKcal)} kcal de entreno.` : 'Sin entreno registrado: si entrenas, tu meta sube.'}</p>
+    <p class="small muted" style="margin:10px 0 0">🎯 Meta = gasto estimado ${fmt(plan.planned.kcal)} (base ${fmt(C.dayBase(P))}${actKcal ? ` + entreno ${fmt(actKcal)}` : ''}) − ${defTxt} objetivo.
+      ${actKcal ? '' : 'Sin entreno registrado: si entrenas, tu meta sube.'}</p>
     ${macroBar('🥩 Proteínas', tot.protein_g, plan.protein_g, COLORS.prot)}
     ${macroBar('🍞 Carbohidratos', tot.carbs_g, plan.carbs_g, COLORS.carb)}
     ${macroBar('🥑 Grasas', tot.fat_g, plan.fat_g, COLORS.fat)}
@@ -945,7 +945,7 @@ async function viewProgress() {
   (food.data || []).forEach((l) => { const x = daily[l.log_date]; if (!x) return; x.kcal += +l.kcal; x.protein_g += +l.protein_g; x.carbs_g += +l.carbs_g; x.fat_g += +l.fat_g; x.n++; });
   (acts.data || []).forEach((a) => { if (daily[a.log_date]) { daily[a.log_date].act += a.minutes; daily[a.log_date].burn += C.activityKcal(P, a); } });
   const totalBurn = days.reduce((a, d) => a + daily[d].burn, 0);
-  allDays.forEach((d) => { const x = daily[d]; const e = C.dayExpenditure(P, x.burn, x.watch); x.spent = e.kcal; x.src = e.source; x.target = C.dayTarget(P, x.burn, x.watch); });
+  allDays.forEach((d) => { const x = daily[d]; const e = C.dayExpenditure(P, x.burn, x.watch); x.spent = e.kcal; x.src = e.source; x.target = C.dayTarget(P, x.burn); });
   const inTarget = (d) => Math.abs(daily[d].kcal - daily[d].target) <= daily[d].target * 0.1;
   const balanceSum = days.filter((d) => daily[d].n > 0).reduce((a, d) => a + (daily[d].kcal - daily[d].spent), 0);
   const watchDays = days.filter((d) => daily[d].n > 0 && daily[d].src === 'reloj').length;

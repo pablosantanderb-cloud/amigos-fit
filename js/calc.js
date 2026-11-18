@@ -172,18 +172,21 @@ export function dayBase(p) {
  * Proteína y grasas se mantienen; la diferencia se ajusta en carbohidratos.
  */
 export function dayPlan(p, exerciseKcal, watch) {
+  // La META solo depende de lo que se puede controlar durante el día: gasto base + entrenos registrados.
+  // El cierre del reloj (que llega al día siguiente) NO la mueve: solo cambia el déficit REAL (spent).
+  const planned = dayExpenditure(p, exerciseKcal, null);
   const spent = dayExpenditure(p, exerciseKcal, watch);
   const deficit = targetDeficit(p);
   const floor = Math.max(bmr(p), p.sex === 'M' ? 1500 : 1200);
-  let kcal = Math.round(spent.kcal - deficit);
+  let kcal = Math.round(planned.kcal - deficit);
   if (deficit > 0) kcal = Math.max(Math.round(floor), kcal);
   const carbs_g = Math.max(0, Math.round((kcal - p.protein_g * 4 - p.fat_g * 9) / 4));
-  return { kcal_target: kcal, protein_g: p.protein_g, carbs_g, fat_g: p.fat_g, spent, deficit, delta: kcal - (p.kcal_target || 0) };
+  return { kcal_target: kcal, protein_g: p.protein_g, carbs_g, fat_g: p.fat_g, planned, spent, deficit, delta: kcal - (p.kcal_target || 0) };
 }
 
-/** Meta de ingesta del día (ver dayPlan) */
-export function dayTarget(p, exerciseKcal = 0, watch = null) {
-  return dayPlan(p, exerciseKcal, watch).kcal_target;
+/** Meta de ingesta del día (ver dayPlan; no depende del cierre del reloj) */
+export function dayTarget(p, exerciseKcal = 0) {
+  return dayPlan(p, exerciseKcal, null).kcal_target;
 }
 
 /**
