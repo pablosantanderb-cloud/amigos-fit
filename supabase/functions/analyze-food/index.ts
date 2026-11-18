@@ -1,7 +1,7 @@
 // Supabase Edge Function: analyze-food
 // Recibe una foto (base64) + comentario opcional y devuelve la estimación nutricional
 // usando Google Gemini (capa gratuita). La API key vive solo en el servidor (secreto GEMINI_API_KEY).
-// Supabase verifica el JWT del usuario antes de ejecutar esta función (solo usuarios logueados).
+// La función verifica en el código que el usuario tenga sesión iniciada ("Verify JWT" desactivado en el panel).
 
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
 const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
@@ -54,9 +54,21 @@ const SCHEMA = {
   required: ["description", "items", "total", "confidence"],
 };
 
+// Verifica que quien llama sea un usuario con sesión iniciada (no basta la clave pública).
+async function getUserId(req: Request): Promise<string | null> {
+  const auth = req.headers.get("Authorization") ?? "";
+  const apikey = req.headers.get("apikey") ?? Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+  if (!auth.startsWith("Bearer ")) return null;
+  const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/auth/v1/user`, { headers: { Authorization: auth, apikey } });
+  if (!r.ok) return null;
+  const u = await r.json();
+  return u?.id ?? null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Método no permitido" }, 405);
+  if (!(await getUserId(req))) return json({ error: "Debes iniciar sesión" }, 401);
   if (!GEMINI_API_KEY) return json({ error: "Falta configurar el secreto GEMINI_API_KEY en Supabase" }, 500);
 
   let body: { image?: string; mimeType?: string; comment?: string; meal?: string };

@@ -34,7 +34,7 @@ dev/                           → mock para probar la UI sin backend
 
 ### 3. Función de análisis de fotos
 En Supabase: **Edge Functions → Deploy a new function → Via Editor** → nombre `analyze-food` → pegar
-`supabase/functions/analyze-food/index.ts` → **Deploy**. Dejar activado *Verify JWT* (solo usuarios logueados).
+`supabase/functions/analyze-food/index.ts` → **Deploy**. En *Settings* de la función, desactivar *Verify JWT with legacy secret*: la función valida al usuario en su propio código.
 
 ### 4. Publicar la web
 1. Subir esta carpeta a un repositorio de GitHub.
