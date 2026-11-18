@@ -329,3 +329,15 @@ table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
 .mc-seg { grid-template-columns: repeat(4, 1fr); margin-bottom: 6px; }
 .mc-macro .mc-row { grid-template-columns: 112px 1fr 44px; margin-top: 10px; }
 .mc-macro .mc-l { color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.cal { display: grid; gap: 6px; margin: 8px 0; }
+.cal-row { display: grid; grid-template-columns: 72px repeat(7, 1fr); gap: 4px; align-items: center; }
+.cal-head span { text-align: center; font-size: .72rem; color: var(--muted); font-weight: 700; display: flex; flex-direction: column; line-height: 1.1; }
+.cal-head small { font-weight: 400; }
+.cal-name { font-size: .8rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-name small { color: var(--muted); font-weight: 400; }
+.cal-c { aspect-ratio: 1; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: .68rem; font-weight: 800; color: #fff; }
+.cal-e { background: var(--bg); color: var(--muted); border: 1px solid var(--line); font-weight: 400; }
+.cal-today { outline: 2px dashed var(--text); outline-offset: 1px; opacity: .85; }
+.dg { background: #16a34a; } .dy { background: #d97706; } .dr { background: #dc2626; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; }

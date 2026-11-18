@@ -1405,6 +1405,45 @@ async function viewProgress() {
 }
 
 // ---------------------------------------------------------------- AMIGOS
+// Calendario de cumplimiento: últimos 7 días, una fila por persona, color según la macro elegida
+function renderDailyCompare(rows, error, from, to, members) {
+  const box = $('#dailyCmp');
+  if (!box) return;
+  if (error) { box.innerHTML = `<p class="err">${esc(error.message)}</p>`; return; }
+  const MAC = { kcal: ['Calorías', 'kcal', 'kcal_target'], p: ['Proteína', 'protein', 'protein_target'], c: ['Carbos', 'carbs', 'carbs_target'], f: ['Grasas', 'fat', 'fat_target'] };
+  const mk = state.mcMacro || 'kcal';
+  const [, key, tkey] = MAC[mk];
+  const days = []; for (let d = from; d <= to; d = C.addDays(d, 1)) days.push(d);
+  const LET = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+  const dow = (iso) => { const [y, m, d] = iso.split('-').map(Number); return LET[new Date(y, m - 1, d, 12).getDay()]; };
+  // verde = en objetivo · amarillo = bajo · rojo = sobre
+  const cls = (pv) => {
+    if (mk === 'p') return pv >= 90 ? 'dg' : 'dy';
+    if (mk === 'kcal') return pv < 90 ? 'dy' : pv <= 110 ? 'dg' : 'dr';
+    return pv > 110 ? 'dr' : pv < 60 ? 'dy' : 'dg';
+  };
+  const byUser = {};
+  rows.forEach((r) => { (byUser[r.user_id] ||= { name: r.display_name, d: {} }).d[r.log_date] = r; });
+  members.forEach((m) => { byUser[m.id] ||= { name: m.name, d: {} }; });
+  const today = C.isoDate();
+  box.innerHTML = `<h2>📅 Día a día</h2>
+    <p class="small muted">% de la meta de cada uno en cada día (últimos 7 días).</p>
+    <div class="seg mc-seg">${Object.entries(MAC).map(([k, v]) => `<button type="button" data-dck="${k}" class="${k === mk ? 'active' : ''}">${v[0]}</button>`).join('')}</div>
+    <div class="cal">
+      <div class="cal-row cal-head"><span></span>${days.map((d) => `<span>${dow(d)}<small>${Number(d.slice(8))}</small></span>`).join('')}</div>
+      ${Object.entries(byUser).map(([uid, u]) => `<div class="cal-row"><span class="cal-name">${esc(u.name)}${uid === session.user.id ? ' <small>(tú)</small>' : ''}</span>
+        ${days.map((d) => {
+          const r = u.d[d];
+          if (!r) return `<span class="cal-c cal-e${d === today ? ' cal-today' : ''}">—</span>`;
+          const tgt = Number(r[tkey]) || 0, val = Number(r[key]) || 0;
+          const pv = tgt ? Math.round((val / tgt) * 100) : 0;
+          return `<span class="cal-c ${cls(pv)}${d === today ? ' cal-today' : ''}" title="${fmt(val)} / ${fmt(tgt)}">${pv}%</span>`;
+        }).join('')}</div>`).join('')}
+    </div>
+    <p class="small muted"><span class="dot dg"></span> en objetivo · <span class="dot dy"></span> bajo · <span class="dot dr"></span> sobre · — sin registro · borde punteado = hoy (en curso)</p>`;
+  $$('#dailyCmp [data-dck]').forEach((b) => (b.onclick = () => { state.mcMacro = b.dataset.dck; renderDailyCompare(rows, null, from, to, members); }));
+}
+
 // Comparación de macros: cada valor como % del objetivo de CADA persona (100% = cumplió), porque las metas son distintas.
 function renderMacroCompare(rows, error) {
   const box = $('#macroCmp');
@@ -1487,6 +1526,7 @@ async function viewFriends() {
   </div>
   <div class="tabs">${[7, 30].map((r) => `<button data-r="${r}" class="${state.groupRange === r ? 'active' : ''}">Últimos ${r} días</button>`).join('')}</div>
   <div class="card" id="board"><div class="loading">Calculando ranking…</div></div>
+  <div class="card" id="dailyCmp"><div class="loading">Armando el calendario…</div></div>
   <div class="card" id="macroCmp"><div class="loading">Comparando macros…</div></div>
   <div class="card"><h2>📉 Cambio de peso vs su punto de partida</h2>
     <p class="small muted">En % respecto del peso inicial de cada uno, para comparar de forma justa.</p>
@@ -1549,6 +1589,9 @@ async function viewFriends() {
     sb.rpc('group_macros', { gid: g.id, p_from: from, p_to: to }),
   ]);
   renderMacroCompare(mc.data || [], mc.error);
+  const dFrom = C.addDays(to, -6);
+  const dm = await sb.rpc('group_daily_macros', { gid: g.id, p_from: dFrom, p_to: to });
+  renderDailyCompare(dm.data || [], dm.error, dFrom, to, (lb.data || []).map((r) => ({ id: r.user_id, name: r.display_name })));
   if (lb.error) { $('#board').innerHTML = `<p class="err">${esc(lb.error.message)}</p>`; return; }
   const rows = lb.data || [];
 
