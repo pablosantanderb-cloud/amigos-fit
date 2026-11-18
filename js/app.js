@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=12';
+import * as C from './calc.js?v=13';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -502,7 +502,7 @@ function ring(value, target) {
 function macroBar(label, value, target, color) {
   const w = target > 0 ? Math.min(100, (value / target) * 100) : 0;
   return `<div class="macro"><div class="row between"><span>${label}</span>
-    <span><b>${r0(value)}</b> / ${r0(target)} g <span class="muted small">· faltan ${Math.max(0, r0(target - value))} g</span></span></div>
+    <span><b>${r0(value)}</b> / ${r0(target)} g ${value > target * 1.05 ? `<span class="small" style="color:var(--danger)">· +${r0(value - target)} g de más</span>` : `<span class="muted small">· faltan ${Math.max(0, r0(target - value))} g</span>`}</span></div>
     <div class="bar"><i style="width:${w}%;background:${color}"></i></div></div>`;
 }
 
@@ -564,7 +564,10 @@ async function viewToday() {
     ${isToday ? (() => {
       const cz = C.macroCoach(plan, tot, new Date().getHours(), { doneMeals: logs.map((l) => mealKey(l.meal)), weightKg: P.weight_kg, trained: (acts.data || []).length > 0 });
       return `<div class="coach ${cz.tone}"><b>💡 Para lo que queda del día</b><ul>${cz.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
-    })() : ''}
+    })() : (() => {
+      const rv = C.dayReview(P, plan, tot, balance, (acts.data || []).length > 0);
+      return `<div class="coach ${rv.tone}"><b>📋 Cómo te fue este día</b>${spent.source === 'reloj' ? '' : ' <span class="small muted">(estimado; ingresa el gasto del reloj para el dato real)</span>'}<ul>${rv.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+    })()}
   </div>
 
   <div class="card">

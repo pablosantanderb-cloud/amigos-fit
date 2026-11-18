@@ -422,3 +422,58 @@ export function macroCoach(t, eaten, hour, opts = {}) {
 
   return { tone: 'info', items: items.slice(0, 4) };
 }
+
+/**
+ * Coach de días pasados: evalúa lo realmente comido vs el plan del día y explica el efecto según el objetivo.
+ * plan: dayPlan(...) · eaten: totales · balance: comido − gasto real (negativo = déficit) · trained: bool
+ */
+export function dayReview(p, plan, eaten, balance, trained) {
+  const r = (x) => Math.round(x).toLocaleString('es-CL');
+  const kg = (kcal) => String(Math.round((Math.abs(kcal) / KCAL_PER_KG) * 100) / 100).replace('.', ',');
+  const g = p.goal;
+  const cutting = ['lose', 'lose_tone', 'recomp'].includes(g);
+  const items = [];
+  if (!eaten.kcal) return { tone: 'info', items: ['Sin comidas registradas este día: no se puede evaluar. La constancia en el registro es lo que más ayuda.'] };
+
+  // Calorías / balance
+  const objDef = plan.deficit; // déficit objetivo (positivo)
+  const realDef = -balance;    // déficit real (positivo)
+  if (g === 'gain') {
+    if (balance > 0) items.push(`✅ Superávit de ${r(balance)} kcal: suficiente para ganar masa (~${kg(balance)} kg potenciales).`);
+    else items.push(`⚠️ Quedaste en déficit de ${r(-balance)} kcal: para ganar músculo necesitas comer más que tu gasto.`);
+  } else if (cutting) {
+    const diff = realDef - objDef;
+    if (realDef <= 0) items.push(`⚠️ Sin déficit (superávit de ${r(balance)} kcal): ese día no sumó a bajar; equivale a ~${kg(balance)} kg en contra.`);
+    else if (Math.abs(diff) <= 150) items.push(`✅ Déficit real de ${r(realDef)} kcal, en línea con tu objetivo (${r(objDef)}): ~${kg(realDef)} kg de avance.`);
+    else if (diff > 150) items.push(`📉 Déficit de ${r(realDef)} kcal, mayor al objetivo (${r(objDef)}): bajas más rápido, pero si se repite aumenta el hambre y el riesgo de perder músculo${g !== 'lose' ? ', justo lo contrario a tonificar' : ''}.`);
+    else items.push(`🟡 Déficit de ${r(realDef)} kcal, menor al objetivo (${r(objDef)}): avance más lento (~${kg(realDef)} kg ese día).`);
+  } else {
+    if (Math.abs(balance) <= 200) items.push(`✅ Balance de ${balance > 0 ? '+' : '−'}${r(Math.abs(balance))} kcal: bien para mantener.`);
+    else items.push(`🟡 ${balance > 0 ? 'Superávit' : 'Déficit'} de ${r(Math.abs(balance))} kcal: algo lejos de mantener; compensa los próximos días.`);
+  }
+
+  // Proteína (la más importante)
+  const pr = eaten.protein_g / Math.max(1, plan.protein_g);
+  if (pr < 0.75) {
+    const why = cutting
+      ? `con déficit y poca proteína, parte del peso que bajes puede ser músculo${g !== 'lose' ? ' (va contra tonificar)' : ''} y te da más hambre`
+      : g === 'gain' ? 'limita la ganancia de músculo aunque comas suficientes calorías'
+      : 'tu recuperación y saciedad empeoran';
+    items.push(`🥩 Proteína baja: ${r(eaten.protein_g)} de ${r(plan.protein_g)} g (${Math.round(pr * 100)}%). Efecto: ${why}.`);
+  } else if (pr < 0.9) {
+    items.push(`🥩 Proteína cerca (${Math.round(pr * 100)}%): suma una porción más (huevos, yogur protein, atún) para proteger tu músculo.`);
+  } else {
+    items.push(`✅ Proteína cumplida (${r(eaten.protein_g)} g): protege tu músculo${cutting ? ' mientras bajas' : ''}.`);
+  }
+
+  // Carbohidratos y grasas (solo si hay algo relevante)
+  const cr = eaten.carbs_g / Math.max(1, plan.carbs_g);
+  const fr = eaten.fat_g / Math.max(1, plan.fat_g);
+  if (trained && cr < 0.6) items.push(`🍞 Pocos carbohidratos en día de entreno (${Math.round(cr * 100)}%): menos energía y peor recuperación.`);
+  else if (cr > 1.25 && balance > -objDef / 2) items.push(`🍞 Carbohidratos altos (${Math.round(cr * 100)}%): fueron la principal causa de quedar sobre la meta.`);
+  if (fr > 1.3) items.push(`🥑 Grasas altas (${Math.round(fr * 100)}%): son muy densas en calorías (9 kcal/g); ojo con frituras, aderezos y frutos secos.`);
+  else if (fr < 0.6) items.push(`🥑 Grasas muy bajas (${Math.round(fr * 100)}%): si se repite, afecta energía y hormonas; incluye palta, aceite de oliva o frutos secos.`);
+
+  const tone = items.some((x) => x.startsWith('⚠️')) ? 'warn' : items.every((x) => x.startsWith('✅')) ? 'ok' : 'info';
+  return { tone, items: items.slice(0, 4) };
+}
