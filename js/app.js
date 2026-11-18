@@ -23,9 +23,12 @@ const GOAL_SHORT = { lose: 'bajar de peso', lose_tone: 'bajar y tonificar', reco
 
 // Llama a la función de IA y devuelve el JSON (o lanza un error legible)
 async function callAI(body) {
+  const t0 = Date.now();
   const { data, error } = await sb.functions.invoke('analyze-food', { body });
   if (error) {
-    let msg = error.message;
+    let msg = error.name === 'FunctionsFetchError'
+      ? `No hubo respuesta del servidor tras ${Math.round((Date.now() - t0) / 1000)} s (revisa tu conexión o intenta de nuevo).`
+      : error.message;
     try { msg = (await error.context.json()).error || msg; } catch { /* sin cuerpo */ }
     throw new Error(msg);
   }

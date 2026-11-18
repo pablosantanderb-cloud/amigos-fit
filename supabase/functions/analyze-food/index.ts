@@ -135,7 +135,7 @@ async function getUserId(req: Request): Promise<string | null> {
   return u?.id ?? null;
 }
 
-Deno.serve(async (req) => {
+async function handle(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Método no permitido" }, 405);
   if (!(await getUserId(req))) return json({ error: "Debes iniciar sesión" }, 401);
@@ -164,27 +164,42 @@ Deno.serve(async (req) => {
   // Prueba el modelo configurado y luego los "flash" que Google tenga disponibles (del más nuevo al más antiguo),
   // así la app sigue funcionando cuando Google retira modelos.
   const models = [...new Set([...(Deno.env.get("GEMINI_MODEL") ? [GEMINI_MODEL] : []), ...(await flashModels()), "gemini-flash-latest"])].slice(0, 5);
-  const payload = JSON.stringify({
-    contents: [{ role: "user", parts }],
-    generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: isActivity ? ACTIVITY_SCHEMA : SCHEMA },
-  });
+  const baseConfig = { temperature: 0.2, responseMimeType: "application/json", responseSchema: isActivity ? ACTIVITY_SCHEMA : SCHEMA };
+  const deadline = Date.now() + 55_000; // responder antes de que el servidor corte la conexión
   let resp: Response | null = null;
   let lastErr = { status: 0, message: "" };
-  for (const model of models) {
-    resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
-      body: payload,
-    });
-    if (resp.ok) break;
-    const detail = await resp.text();
-    let message = detail.slice(0, 300);
-    try { message = JSON.parse(detail)?.error?.message ?? message; } catch { /* texto plano */ }
-    lastErr = { status: resp.status, message };
-    console.error("Gemini error", model, resp.status, message);
-    // Solo vale la pena probar otro modelo si este no existe, no está disponible o está saturado
-    if (![404, 429, 500, 503].includes(resp.status)) break;
-    resp = null;
+  outer: for (const model of models) {
+    // Los modelos 3.x "piensan" antes de responder; pedimos razonamiento bajo para que sea rápido.
+    const configs = /^gemini-[3-9]/.test(model) ? [{ ...baseConfig, thinkingConfig: { thinkingLevel: "low" } }, baseConfig] : [baseConfig];
+    for (const generationConfig of configs) {
+      const left = deadline - Date.now();
+      if (left < 5_000) { lastErr = { status: 504, message: "la IA tardó demasiado" }; break outer; }
+      try {
+        resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
+          body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig }),
+          signal: AbortSignal.timeout(Math.min(40_000, left)),
+        });
+      } catch (e) {
+        lastErr = { status: 504, message: `sin respuesta de ${model} (${(e as Error).name})` };
+        console.error("Gemini timeout/red", model, e);
+        resp = null;
+        continue outer;
+      }
+      if (resp.ok) break outer;
+      const detail = await resp.text();
+      let message = detail.slice(0, 300);
+      try { message = JSON.parse(detail)?.error?.message ?? message; } catch { /* texto plano */ }
+      lastErr = { status: resp.status, message };
+      console.error("Gemini error", model, resp.status, message);
+      resp = null;
+      // Si el problema fue el parámetro de razonamiento, reintenta el mismo modelo sin él
+      if (lastErr.status === 400 && /thinking/i.test(message)) continue;
+      // Otro modelo solo si este no existe, no está disponible o está saturado
+      if (![404, 429, 500, 503].includes(lastErr.status)) break outer;
+      continue outer;
+    }
   }
 
   if (!resp || !resp.ok) {
@@ -217,5 +232,16 @@ Deno.serve(async (req) => {
   } catch {
     console.error("Respuesta no-JSON de Gemini", text);
     return json({ error: "La IA devolvió una respuesta inválida, intenta de nuevo." }, 502);
+  }
+}
+
+// Cualquier error inesperado vuelve como JSON con CORS (si no, Safari solo dice "Failed to send a request").
+Deno.serve(async (req) => {
+  const t0 = Date.now();
+  try {
+    return await handle(req);
+  } catch (e) {
+    console.error("Error inesperado", e);
+    return json({ error: `Error interno al analizar (${Math.round((Date.now() - t0) / 1000)} s): ${(e as Error).message}` }, 500);
   }
 });
