@@ -159,7 +159,7 @@ const photoPicker = (id, title, sub) => `
   </div>
   <label class="btn ghost block" style="margin:8px 0 0">📷 Cargar foto<input id="${id}-gal" type="file" accept="image/*" class="vh"></label>`;
 // Varias fotos (hasta "limit"): miniaturas con ✕ y botón para agregar más
-const MAX_FOOD_PHOTOS = 4;
+const MAX_FOOD_PHOTOS = 6;
 const multiPhotoPicker = (id, title, sub) => `
   <div class="photo-drop" id="${id}-drop">
     <div id="${id}-ph"><div style="font-size:2.2rem">📷</div><div><b>${title}</b></div><div class="small">${sub}</div></div>
@@ -1144,7 +1144,7 @@ async function resizeImage(file, max = 1024, quality = 0.82) {
 }
 
 async function viewRegister() {
-  let photos = []; // [{ blob, dataUrl, base64 }] hasta 4
+  let photos = []; // [{ blob, dataUrl, base64 }] hasta 6
   let items = [];
   let meta = { description: '', confidence: null, notes: '' };
 
@@ -1155,8 +1155,8 @@ async function viewRegister() {
     <div class="seg" id="mealSeg">${Object.entries(MEALS).map(([k, v]) => `<button type="button" data-meal="${k}" class="${k === defaultMeal() ? 'active' : ''}">${v}</button>`).join('')}</div>
     <input id="meal" type="hidden" value="${defaultMeal()}">
     <label>Fecha</label><input id="date" type="date" value="${state.date}" max="${C.isoDate()}">
-    <label>Fotos (recomendado · hasta 4)</label>
-    ${multiPhotoPicker('food', 'Fotos del plato (hasta 4)', 'varios ángulos o cada parte de la comida mejoran la estimación')}
+    <label>Fotos (recomendado · hasta 6)</label>
+    ${multiPhotoPicker('food', 'Fotos del plato (hasta 6)', 'varios ángulos o cada parte de la comida mejoran la estimación')}
     <label>¿Qué comiste? <span class="muted">(obligatorio si no hay foto)</span></label>
     <textarea id="comment" maxlength="500" placeholder="Ej: 2 huevos duros y una marraqueta con palta. Con foto puedes agregar detalles: 'le eché 1 cucharada de aceite', 'me comí la mitad'."></textarea>
     <button id="analyze" class="btn block" style="margin-top:12px">✨ Analizar con IA</button>

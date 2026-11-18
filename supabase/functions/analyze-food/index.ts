@@ -146,10 +146,10 @@ async function handle(req: Request): Promise<Response> {
   try { body = await req.json(); } catch { return json({ error: "JSON inválido" }, 400); }
 
   const { image, mimeType = "image/jpeg", comment = "", meal = "", mode = "food", today = "", viewing = "" } = body;
-  const images = (Array.isArray(body.images) ? body.images : image ? [image] : []).filter((x) => typeof x === "string" && x).slice(0, 4);
+  const images = (Array.isArray(body.images) ? body.images : image ? [image] : []).filter((x) => typeof x === "string" && x).slice(0, 6);
   const isActivity = mode === "activity";
   if (isActivity ? !images.length : !images.length && !comment.trim()) return json({ error: isActivity ? "Envía un pantallazo" : "Envía una foto o un comentario" }, 400);
-  if (images.reduce((a, x) => a + x.length, 0) > 8_000_000) return json({ error: "Imágenes demasiado grandes" }, 413);
+  if (images.reduce((a, x) => a + x.length, 0) > 10_000_000) return json({ error: "Imágenes demasiado grandes" }, 413);
 
   const parts: unknown[] = [];
   if (isActivity) {
