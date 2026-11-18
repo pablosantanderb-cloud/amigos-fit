@@ -212,7 +212,7 @@ end $$;
 
 -- ---------- RPC: ranking del grupo ----------
 -- Puntaje 0-100 que premia CONSTANCIA y CUMPLIMIENTO, no solo kilos:
---   30% constancia (días con registro) · 25% calorías dentro de ±10% de la meta diaria (fija)
+--   30% constancia (días con registro) · 25% calorías dentro de ±10% de la meta del día (ajustada por entreno)
 --   20% proteína ≥ 90% de la meta · 15% minutos de actividad vs meta semanal
 --   10% tendencia del peso en la dirección de su propio objetivo
 drop function if exists public.group_leaderboard(uuid, date, date);
@@ -235,13 +235,32 @@ d as (
   group by 1, 2
 ),
 
+-- kcal por minuto de entreno según intensidad habitual y peso (igual que la app)
+kpm as (
+  select m.id,
+    ((case m.training_intensity when 'ligera' then 4 when 'intensa' then 9 else 6 end) - 1) * 3.5 * coalesce(m.weight_kg, 70) / 200.0 as per_min
+  from m
+),
+ex as (  -- entreno de cada día: % de las kcal del reloj o estimado por minutos
+  select a.user_id, a.log_date,
+    sum(case when coalesce(a.kcal_burned, 0) > 0 then a.kcal_burned * coalesce(m.exercise_credit_pct, 75) / 100.0
+             else a.minutes * k.per_min end) kc
+  from activity_logs a join m on m.id = a.user_id join kpm k on k.id = a.user_id
+  where a.log_date between p_from and p_to
+  group by 1, 2
+),
 agg as (
   select m.id,
     count(d.log_date)::int as days_logged,
-    (count(*) filter (where m.kcal_target > 0 and d.kcal between m.kcal_target * 0.9 and m.kcal_target * 1.1))::int as kcal_ok,
+    -- meta del día = meta base + (entreno del día − entreno promedio habitual), igual que en la app
+    (count(*) filter (where m.kcal_target > 0 and d.kcal between
+        (m.kcal_target + coalesce(ex.kc, 0) - coalesce(m.training_sessions_week, 0) * coalesce(m.training_minutes, 0) * k.per_min / 7.0) * 0.9 and
+        (m.kcal_target + coalesce(ex.kc, 0) - coalesce(m.training_sessions_week, 0) * coalesce(m.training_minutes, 0) * k.per_min / 7.0) * 1.1))::int as kcal_ok,
     (count(*) filter (where m.protein_g > 0 and d.prot >= m.protein_g * 0.9))::int as prot_ok,
     round(avg(d.kcal))::numeric as avg_kcal
-  from m left join d on d.user_id = m.id
+  from m join kpm k on k.id = m.id
+  left join d on d.user_id = m.id
+  left join ex on ex.user_id = d.user_id and ex.log_date = d.log_date
   group by m.id
 ),
 act as (

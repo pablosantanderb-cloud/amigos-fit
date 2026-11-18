@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=9';
+import * as C from './calc.js?v=10';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -511,13 +511,15 @@ async function viewToday() {
   }
 
   const byMeal = Object.keys(MEALS).map((m) => ({ m, items: logs.filter((l) => mealKey(l.meal) === m) })).filter((g) => g.items.length);
-  const actMin = (acts.data || []).reduce((a, x) => a + x.minutes, 0);
   const actKcal = (acts.data || []).reduce((a, x) => a + C.activityKcal(P, x), 0); // ya ajustado (% del reloj)
-  const target = C.dayTarget(P);
-  const remaining = target - tot.kcal;
   const watch = energy.data;
-  const spent = C.dayExpenditure(P, actKcal, watch);
+  const plan = C.dayPlan(P, actKcal, watch);   // meta de hoy = gasto de hoy − déficit objetivo
+  const spent = plan.spent;
+  const target = plan.kcal_target;
+  const remaining = target - tot.kcal;
   const balance = tot.kcal - spent.kcal; // negativo = déficit
+  const isToday = d === C.isoDate();
+  const defTxt = plan.deficit >= 0 ? `déficit de ${fmt(plan.deficit)}` : `superávit de ${fmt(-plan.deficit)}`;
 
   app.innerHTML = `
   <div class="date-nav">
@@ -530,38 +532,25 @@ async function viewToday() {
     <div class="ring-wrap">
       ${ring(tot.kcal, target)}
       <div class="kpis">
-        <div class="kpi"><span class="muted">Meta diaria</span><b>${fmt(target)}</b></div>
+        <div class="kpi"><span class="muted">Meta de ${isToday ? 'hoy' : 'este día'}</span><b>${fmt(target)}</b></div>
         <div class="kpi"><span class="muted">Consumido</span><b>${fmt(tot.kcal)}</b></div>
         <div class="kpi"><span class="muted">${remaining >= 0 ? 'Te quedan' : 'Te pasaste'}</span>
           <b style="color:${remaining >= 0 ? 'var(--accent)' : 'var(--danger)'}">${fmt(Math.abs(remaining))}</b></div>
       </div>
     </div>
-    ${tot.kcal > 0 ? `<div class="balance ${balance < 0 ? 'ok' : 'over'}">
-      <div class="row between"><span>${spent.source === 'reloj' ? '⌚ Balance del día (reloj)' : '📐 Balance del día (estimado)'}</span>
-        <b>${balance < 0 ? `Déficit ${fmt(-balance)}` : `Superávit ${fmt(balance)}`} kcal</b></div>
-      <table class="bal">
-        ${spent.source === 'reloj'
-          ? `<tr><td>Gasto según tu reloj${watch.active_kcal ? ` (reposo ${fmt(watch.resting_kcal || watch.total_kcal - watch.active_kcal)} + ${P.exercise_credit_pct ?? C.DEFAULT_CREDIT}% de activa ${fmt(watch.active_kcal)})` : ''}</td><td>${fmt(spent.kcal)}</td></tr>`
-          : `<tr><td>Gasto sin ejercicio <span class="muted">(metabolismo ${fmt(C.bmr(P))} × actividad diaria ${String(C.ACTIVITY_LEVELS[P.activity_level]?.factor ?? 1.2).replace('.', ',')})</span></td><td>${fmt(C.baseNoTraining(P))}</td></tr>
-             <tr><td>+ Ejercicio registrado este día</td><td>${actKcal ? `+${fmt(actKcal)}` : '0'}</td></tr>
-             <tr class="sum"><td>= Gasto del día</td><td>${fmt(spent.kcal)}</td></tr>`}
-        <tr><td>− Comido</td><td>−${fmt(tot.kcal)}</td></tr>
-        <tr class="sum"><td>= ${balance < 0 ? 'Déficit' : 'Superávit'}</td><td>${fmt(Math.abs(balance))}</td></tr>
-      </table>
-      ${spent.source !== 'reloj' ? `<span class="small muted">${actKcal ? '' : 'Si entrenaste este día, regístralo abajo: tu gasto sube y el déficit aumenta. '}Para un balance más exacto, ingresa abajo el gasto total de tu reloj.</span>` : ''}
-    </div>
-    <p class="small muted" style="margin-top:8px">ℹ️ Tu meta de ${fmt(P.kcal_target)} kcal = gasto promedio ${fmt(C.tdee(P))} ${P.kcal_target < C.tdee(P) ? `− ${fmt(C.tdee(P) - P.kcal_target)}` : P.kcal_target > C.tdee(P) ? `+ ${fmt(P.kcal_target - C.tdee(P))}` : ''}. ${learnTxt(P)}</p>` : ''}
-    ${macroBar('🥩 Proteínas', tot.protein_g, P.protein_g, COLORS.prot)}
-    ${macroBar('🍞 Carbohidratos', tot.carbs_g, P.carbs_g, COLORS.carb)}
-    ${macroBar('🥑 Grasas', tot.fat_g, P.fat_g, COLORS.fat)}
-    ${d === C.isoDate() ? (() => {
-      const cz = C.macroCoach(P, tot, new Date().getHours(), logs.map((l) => mealKey(l.meal)));
+    <p class="small muted" style="margin:10px 0 0">🎯 Meta = gasto de ${isToday ? 'hoy' : 'este día'} ${fmt(spent.kcal)} − ${defTxt} objetivo.
+      ${spent.source === 'reloj' ? 'Gasto según tu reloj.' : actKcal ? `Incluye ${fmt(actKcal)} kcal de entreno.` : 'Sin entreno registrado: si entrenas, tu meta sube.'}</p>
+    ${macroBar('🥩 Proteínas', tot.protein_g, plan.protein_g, COLORS.prot)}
+    ${macroBar('🍞 Carbohidratos', tot.carbs_g, plan.carbs_g, COLORS.carb)}
+    ${macroBar('🥑 Grasas', tot.fat_g, plan.fat_g, COLORS.fat)}
+    ${isToday ? (() => {
+      const cz = C.macroCoach(plan, tot, new Date().getHours(), { doneMeals: logs.map((l) => mealKey(l.meal)), weightKg: P.weight_kg, trained: (acts.data || []).length > 0 });
       return `<div class="coach ${cz.tone}"><b>💡 Para lo que queda del día</b><ul>${cz.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
     })() : ''}
   </div>
 
   <div class="card">
-    <div class="row between"><h2 style="margin:0">Comidas</h2><a class="btn sm" href="#/registrar">📷 Registrar</a></div>
+    <div class="row between"><h2 style="margin:0">🍽️ Comidas</h2><a class="btn sm" href="#/registrar">📷 Registrar</a></div>
     ${byMeal.length ? byMeal.map((g) => `
       <div class="meal-h"><span>${MEALS[g.m]}</span><span>${fmt(C.sumLogs(g.items).kcal)} kcal</span></div>
       ${g.items.map((l) => `
@@ -572,7 +561,58 @@ async function viewToday() {
             ${l.comment ? `<div class="mac">“${esc(l.comment)}”</div>` : ''}</div>
           <button class="icon-btn" data-del="${l.id}" title="Eliminar">🗑️</button>
         </div>`).join('')}`).join('')
-      : `<p class="muted">Aún no registras comidas ${d === C.isoDate() ? 'hoy' : 'este día'}. Toma una foto de tu plato 📸</p>`}
+      : `<p class="muted">Aún no registras comidas ${isToday ? 'hoy' : 'este día'}. Toma una foto de tu plato 📸</p>`}
+  </div>
+
+  <div class="card">
+    <h2>🏃 Entrenamientos</h2>
+    ${(acts.data || []).map((a) => `<div class="row between food"><div class="info"><div class="name">${a.source === 'reloj' ? '⌚ ' : ''}${esc(a.activity)}</div>
+      <div class="mac">${a.minutes} min${a.kcal_burned ? ` · ${fmt(a.kcal_burned)} kcal` : ''}${a.steps ? ` · ${fmt(a.steps)} pasos` : ''}${a.distance_km ? ` · ${dec(r1(a.distance_km))} km` : ''} · suma ${fmt(C.activityKcal(P, a))} kcal a tu meta</div></div>
+      <button class="icon-btn" data-delact="${a.id}">🗑️</button></div>`).join('') || `<p class="muted small">Sin entrenamientos ${isToday ? 'hoy' : 'este día'}.</p>`}
+    <button type="button" id="aToggle" class="btn block" style="margin-top:8px">➕ Agregar entrenamiento</button>
+    <div id="aPanel" class="hidden">
+      <div class="tabs" style="margin-top:10px"><button type="button" data-at="foto" class="active">📷 Desde foto</button><button type="button" data-at="manual">✍️ Manual</button></div>
+      <div id="atFoto">
+        <p class="small muted">Pantallazo de la app de tu reloj (Apple Fitness/Salud, Garmin, Huawei, Zepp, Samsung…). La IA lee el entreno y, si aparece, el gasto total del día.</p>
+        ${photoPicker('act', 'Pantallazo del reloj', 'resumen del entrenamiento o del día')}
+        <button id="actAnalyze" class="btn block" style="margin-top:8px">✨ Leer pantallazo</button>
+        <div id="actResult"></div>
+      </div>
+      <form id="af" class="grid2 hidden">
+        <div style="grid-column:1/-1"><label>Actividad</label><input name="activity" list="acts" required placeholder="Ej: Caminar, pesas, fútbol"></div>
+        <div><label>Minutos</label><input name="minutes" type="text" inputmode="numeric" pattern="[0-9]+" required></div>
+        <div><label>kcal (opcional)</label><input name="kcal" type="text" inputmode="numeric" pattern="[0-9]+" placeholder="del reloj"></div>
+        <div style="grid-column:1/-1"><label>Fecha</label><input name="date" type="date" value="${d}" max="${C.isoDate()}" required></div>
+        <datalist id="acts">${['Caminar', 'Correr', 'Pesas / gimnasio', 'Bicicleta', 'Natación', 'Fútbol', 'Pádel / tenis', 'Yoga / pilates', 'Baile', 'Trekking', 'Crossfit / HIIT'].map((x) => `<option value="${x}">`).join('')}</datalist>
+        <button class="btn" style="grid-column:1/-1">Guardar entrenamiento</button>
+        <p class="small muted" style="grid-column:1/-1;margin:0">Sin kcal, se estiman según minutos, tu peso e intensidad habitual.</p>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>📊 Balance del día</h2>
+    ${tot.kcal > 0 ? `<div class="balance ${balance < 0 ? 'ok' : 'over'}" style="margin-top:0">
+      <div class="row between"><span>${spent.source === 'reloj' ? '⌚ Con el gasto de tu reloj' : '📐 Estimado'}</span>
+        <b>${balance < 0 ? `Déficit ${fmt(-balance)}` : `Superávit ${fmt(balance)}`} kcal</b></div>
+      <table class="bal">
+        ${spent.source === 'reloj'
+          ? `<tr><td>Gasto según tu reloj${watch.active_kcal ? ` (reposo ${fmt(watch.resting_kcal || watch.total_kcal - watch.active_kcal)} + ${P.exercise_credit_pct ?? C.DEFAULT_CREDIT}% de activa ${fmt(watch.active_kcal)})` : ''}</td><td>${fmt(spent.kcal)}</td></tr>`
+          : `<tr><td>Gasto sin ejercicio <span class="muted">${C.learnedWeight(P) > 0 ? '(aprendido de tu reloj)' : `(metabolismo ${fmt(C.bmr(P))} × actividad ${String(C.ACTIVITY_LEVELS[P.activity_level]?.factor ?? 1.2).replace('.', ',')})`}</span></td><td>${fmt(C.dayBase(P))}</td></tr>
+             <tr><td>+ Entrenamientos</td><td>${actKcal ? `+${fmt(actKcal)}` : '0'}</td></tr>
+             <tr class="sum"><td>= Gasto del día</td><td>${fmt(spent.kcal)}</td></tr>`}
+        <tr><td>− Comido</td><td>−${fmt(tot.kcal)}</td></tr>
+        <tr class="sum"><td>= ${balance < 0 ? 'Déficit' : 'Superávit'} <span class="muted">(objetivo: ${defTxt})</span></td><td>${fmt(Math.abs(balance))}</td></tr>
+      </table>
+    </div>` : '<p class="small muted">Registra tus comidas para ver el balance.</p>'}
+    <button type="button" id="eToggle" class="btn ghost block" style="margin-top:10px">⌚ ${watch ? 'Editar gasto total del reloj' : 'Cerrar el día con el gasto total del reloj'}</button>
+    <form id="ef" class="grid3 hidden" style="margin-top:6px">
+      <div><label>Total (kcal)</label><input name="total_kcal" type="text" inputmode="numeric" pattern="[0-9]+" value="${watch?.total_kcal ?? ''}" placeholder="Ej: 2780"></div>
+      <div><label>Activa</label><input name="active_kcal" type="text" inputmode="numeric" pattern="[0-9]*" value="${watch?.active_kcal ?? ''}" placeholder="opcional"></div>
+      <div><label>En reposo</label><input name="resting_kcal" type="text" inputmode="numeric" pattern="[0-9]*" value="${watch?.resting_kcal ?? ''}" placeholder="opcional"></div>
+      <button class="btn" style="grid-column:1/-1">Guardar gasto del día</button>
+      <p class="small muted" style="grid-column:1/-1;margin:0">En Apple: app Salud → Energía activa + Energía en reposo. Se considera el ${P.exercise_credit_pct ?? C.DEFAULT_CREDIT}% de la activa. Con 7+ días registrados, tu meta aprende de tu gasto real.${watch ? ' <a href="#" id="delEnergy">Quitar dato de este día</a>' : ''}</p>
+    </form>
   </div>
 
   <div class="card">
@@ -585,43 +625,17 @@ async function viewToday() {
       <button class="btn" style="grid-column:1/-1">Guardar</button>
       <p class="small muted" style="grid-column:1/-1;margin:0">Se guarda en ${prettyDate(d).toLowerCase()}. Usa ‹ › arriba para registrar otros días.</p>
     </form>
-  </div>
-
-  <div class="card">
-    <h2>⌚ Cierre del día (gasto total del reloj)</h2>
-    <p class="small muted">Al final del día ingresa el gasto <b>total</b> que marca tu reloj (en Apple: app Salud → Energía activa + Energía en reposo). Ese día el balance usa este dato real en vez de la estimación. Se considera el ${P.exercise_credit_pct ?? C.DEFAULT_CREDIT}% de la parte activa, porque los relojes suelen sobreestimarla. También lo puedes leer desde un pantallazo en la sección de abajo.</p>
-    <form id="ef" class="grid3">
-      <div><label>Total (kcal)</label><input name="total_kcal" type="text" inputmode="numeric" pattern="[0-9]+" value="${watch?.total_kcal ?? ''}" placeholder="Ej: 2780"></div>
-      <div><label>Activa</label><input name="active_kcal" type="text" inputmode="numeric" pattern="[0-9]*" value="${watch?.active_kcal ?? ''}" placeholder="opcional"></div>
-      <div><label>En reposo</label><input name="resting_kcal" type="text" inputmode="numeric" pattern="[0-9]*" value="${watch?.resting_kcal ?? ''}" placeholder="opcional"></div>
-      <button class="btn ghost" style="grid-column:1/-1">${watch ? 'Actualizar' : 'Guardar'} gasto del día</button>
-    </form>
-    ${watch ? '<p class="small"><a href="#" id="delEnergy">Quitar dato del reloj de este día</a></p>' : ''}
-  </div>
-
-  <div class="card">
-    <h2>🏃 Entrenamientos</h2>
-    <p class="small muted">Solo sesiones de ejercicio. El movimiento normal del día ya está en tu gasto base.</p>
-    ${(acts.data || []).map((a) => `<div class="row between food"><div class="info"><div class="name">${a.source === 'reloj' ? '⌚ ' : ''}${esc(a.activity)}</div>
-      <div class="mac">${a.minutes} min${a.kcal_burned ? ` · ${fmt(a.kcal_burned)} kcal` : ''}${a.steps ? ` · ${fmt(a.steps)} pasos` : ''}${a.distance_km ? ` · ${dec(r1(a.distance_km))} km` : ''}</div></div>
-      <button class="icon-btn" data-delact="${a.id}">🗑️</button></div>`).join('') || `<p class="muted small">Sin actividad registrada ${d === C.isoDate() ? 'hoy' : 'este día'}.</p>`}
-
-    <h3>⌚ Desde tu reloj o smart band</h3>
-    <p class="small muted">Sube un pantallazo de la app de tu reloj (Apple Fitness/Salud, Garmin, Huawei Health, Zepp, Mi Fitness, Samsung Health…). La IA separa los entrenamientos del gasto total del día, y si muestra varios días los ordena por fecha.</p>
-    ${photoPicker('act', 'Pantallazo del reloj', 'resumen del entrenamiento o del día')}
-    <button id="actAnalyze" class="btn block" style="margin-top:8px">✨ Leer pantallazo</button>
-    <div id="actResult"></div>
-
-    <h3>✍️ O ingrésala a mano</h3>
-    <form id="af" class="grid2">
-      <div style="grid-column:1/-1"><label>Actividad</label><input name="activity" list="acts" required placeholder="Ej: Caminar, pesas, fútbol"></div>
-      <div><label>Minutos</label><input name="minutes" type="text" inputmode="numeric" pattern="[0-9]+" required></div>
-      <div><label>kcal (opcional)</label><input name="kcal" type="text" inputmode="numeric" pattern="[0-9]+"></div>
-      <div style="grid-column:1/-1"><label>Fecha</label><input name="date" type="date" value="${d}" max="${C.isoDate()}" required></div>
-      <datalist id="acts">${['Caminar', 'Correr', 'Pesas / gimnasio', 'Bicicleta', 'Natación', 'Fútbol', 'Pádel / tenis', 'Yoga / pilates', 'Baile', 'Trekking', 'Crossfit / HIIT'].map((x) => `<option value="${x}">`).join('')}</datalist>
-      <button class="btn ghost" style="grid-column:1/-1">Agregar actividad</button>
-    </form>
   </div>`;
+
+  // Botones que muestran/ocultan formularios
+  const reveal = (btn, panel, focus) => ($(btn).onclick = () => { $(panel).classList.remove('hidden'); $(btn).classList.add('hidden'); if (focus) focus(); });
+  reveal('#aToggle', '#aPanel');
+  reveal('#eToggle', '#ef', () => $('#ef').total_kcal.focus());
+  $$('[data-at]').forEach((b) => (b.onclick = () => {
+    $$('[data-at]').forEach((x) => x.classList.toggle('active', x === b));
+    $('#atFoto').classList.toggle('hidden', b.dataset.at !== 'foto');
+    $('#af').classList.toggle('hidden', b.dataset.at !== 'manual');
+  }));
 
   $('#prev').onclick = () => { state.date = C.addDays(d, -1); route(); };
   $('#next').onclick = () => { if (d < C.isoDate()) { state.date = C.addDays(d, 1); route(); } };
@@ -640,12 +654,7 @@ async function viewToday() {
     route();
   }));
 
-  $('#wToggle').onclick = () => {
-    const f = $('#wf');
-    const open = f.classList.toggle('hidden') === false;
-    $('#wToggle').classList.toggle('hidden', open);
-    if (open) f.weight_kg.focus();
-  };
+  reveal('#wToggle', '#wf', () => $('#wf').weight_kg.focus());
 
   $('#wf').onsubmit = async (ev) => {
     ev.preventDefault();
@@ -918,7 +927,7 @@ async function viewProgress() {
   (food.data || []).forEach((l) => { const x = daily[l.log_date]; if (!x) return; x.kcal += +l.kcal; x.protein_g += +l.protein_g; x.carbs_g += +l.carbs_g; x.fat_g += +l.fat_g; x.n++; });
   (acts.data || []).forEach((a) => { if (daily[a.log_date]) { daily[a.log_date].act += a.minutes; daily[a.log_date].burn += C.activityKcal(P, a); } });
   const totalBurn = days.reduce((a, d) => a + daily[d].burn, 0);
-  allDays.forEach((d) => { const x = daily[d]; const e = C.dayExpenditure(P, x.burn, x.watch); x.spent = e.kcal; x.src = e.source; x.target = C.dayTarget(P); });
+  allDays.forEach((d) => { const x = daily[d]; const e = C.dayExpenditure(P, x.burn, x.watch); x.spent = e.kcal; x.src = e.source; x.target = C.dayTarget(P, x.burn, x.watch); });
   const inTarget = (d) => Math.abs(daily[d].kcal - daily[d].target) <= daily[d].target * 0.1;
   const balanceSum = days.filter((d) => daily[d].n > 0).reduce((a, d) => a + (daily[d].kcal - daily[d].spent), 0);
   const watchDays = days.filter((d) => daily[d].n > 0 && daily[d].src === 'reloj').length;

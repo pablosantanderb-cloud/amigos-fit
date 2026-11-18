@@ -125,9 +125,35 @@ export function activityKcal(p, a) {
   return Math.round((Number(a.minutes) || 0) * trainingKcalPerMin(p));
 }
 
-/** Meta de ingesta del día: FIJA (no cambia si entrenas o no) */
-export function dayTarget(p) {
-  return p.kcal_target || 0;
+/** Déficit diario objetivo (positivo = déficit; negativo = superávit para ganar masa) */
+export function targetDeficit(p) {
+  return tdee(p) - (p.kcal_target || 0);
+}
+
+/** Gasto de un día SIN entrenar (si la app ya aprendió de tu reloj, usa ese promedio sin los entrenos habituales) */
+export function dayBase(p) {
+  return tdee(p) - avgTrainingKcal(p);
+}
+
+/**
+ * Plan del día: la meta de ingesta se ajusta al gasto REAL del día para mantener tu déficit objetivo.
+ *   meta de hoy = gasto de hoy − déficit objetivo
+ * Día con entreno → la meta sube; día sin entreno → baja (nunca bajo tu metabolismo basal / mínimo saludable).
+ * Proteína y grasas se mantienen; la diferencia se ajusta en carbohidratos.
+ */
+export function dayPlan(p, exerciseKcal, watch) {
+  const spent = dayExpenditure(p, exerciseKcal, watch);
+  const deficit = targetDeficit(p);
+  const floor = Math.max(bmr(p), p.sex === 'M' ? 1500 : 1200);
+  let kcal = Math.round(spent.kcal - deficit);
+  if (deficit > 0) kcal = Math.max(Math.round(floor), kcal);
+  const carbs_g = Math.max(0, Math.round((kcal - p.protein_g * 4 - p.fat_g * 9) / 4));
+  return { kcal_target: kcal, protein_g: p.protein_g, carbs_g, fat_g: p.fat_g, spent, deficit, delta: kcal - (p.kcal_target || 0) };
+}
+
+/** Meta de ingesta del día (ver dayPlan) */
+export function dayTarget(p, exerciseKcal = 0, watch = null) {
+  return dayPlan(p, exerciseKcal, watch).kcal_target;
 }
 
 /**
@@ -144,7 +170,7 @@ export function dayExpenditure(p, exerciseKcal, watch) {
     const kcal = rest && act ? rest + act * c : bmr(p) + Math.max(0, total - bmr(p)) * c;
     return { kcal: Math.round(Math.min(total, kcal)), source: 'reloj' };
   }
-  return { kcal: baseNoTraining(p) + Math.round(Number(exerciseKcal) || 0), source: 'estimado' };
+  return { kcal: dayBase(p) + Math.round(Number(exerciseKcal) || 0), source: 'estimado' };
 }
 
 /**
@@ -290,77 +316,76 @@ export function mealsLeft(hour) {
   return [];
 }
 
+/** Minutos de ejercicio para quemar "kcal" (caminata MET 3,5 · trote MET 8), según peso */
+export function exerciseFor(kcal, weightKg) {
+  const per = (met) => ((met - 1) * 3.5 * (Number(weightKg) || 70)) / 200;
+  const r5 = (m) => Math.max(10, Math.round(m / 5) * 5);
+  return { walk: r5(kcal / per(3.5)), jog: r5(kcal / per(8)) };
+}
+
 /**
- * Sugerencias para lo que queda del día.
- * t: metas { kcal_target, protein_g, carbs_g, fat_g }, eaten: { kcal, protein_g, carbs_g, fat_g }, hour: 0–23
- * Devuelve { tone: 'ok'|'warn'|'info', items: [texto] }
+ * Sugerencias breves para lo que queda del día (nutrición + ejercicio).
+ * t: plan del día { kcal_target, protein_g, carbs_g, fat_g } · eaten: totales · hour: 0–23
+ * opts: { doneMeals: ['desayuno',…], weightKg, trained: bool }
+ * Devuelve { tone: 'ok'|'warn'|'info', items: [texto] } (máx. 4 frases cortas)
  */
-export function macroCoach(t, eaten, hour, doneMeals = []) {
+export function macroCoach(t, eaten, hour, opts = {}) {
+  const { doneMeals = [], weightKg = 70, trained = false } = Array.isArray(opts) ? { doneMeals: opts } : opts;
   const left = { kcal: t.kcal_target - eaten.kcal, p: t.protein_g - eaten.protein_g, c: t.carbs_g - eaten.carbs_g, f: t.fat_g - eaten.fat_g };
-  // comidas que quedan: según la hora y descartando las ya registradas (y las anteriores a la última)
   const ORDER = ['desayuno', 'almuerzo', 'once', 'cena'];
   const lastDone = Math.max(-1, ...doneMeals.map((m) => ORDER.indexOf(m)));
   const meals = mealsLeft(hour).filter((m) => ORDER.indexOf(m) > lastDone);
+  const n = Math.max(1, meals.length);
+  const r = (x) => Math.round(x).toLocaleString('es-CL');
   const items = [];
-  const r = (n) => Math.round(n).toLocaleString('es-CL');
-  const near = (l, goal) => Math.abs(l) <= goal * 0.1;
 
   if (eaten.kcal === 0) {
-    const n = Math.max(1, meals.length || 1);
-    items.push(`Aún no registras comidas. Reparte ~${r(t.kcal_target / n)} kcal y ~${r(t.protein_g / n)} g de proteína en ${meals.length > 1 ? `cada una de tus ${n} comidas (${meals.join(', ')})` : 'tu próxima comida'}.`);
-    items.push('Arma cada plato con ½ verduras, ¼ proteína magra y ¼ carbohidratos.');
+    items.push(`🍽️ Reparte ~${r(t.kcal_target / n)} kcal y ~${r(t.protein_g / n)} g de proteína por comida${meals.length > 1 ? ` (${meals.join(', ')})` : ''}.`);
+    items.push('🥗 Plato: ½ verduras, ¼ proteína magra, ¼ carbohidratos.');
+    if (!trained && hour < 20) items.push('🏃 Si entrenas hoy, regístralo: tu meta sube.');
     return { tone: 'info', items };
   }
 
-  // ¿Se pasó de calorías?
-  if (left.kcal < -t.kcal_target * 0.05) {
-    items.push(`Te pasaste ${r(-left.kcal)} kcal de tu meta. Para el resto del día prefiere solo verduras, caldos o infusiones y agua.`);
-    if (left.p > 15) items.push(`Si te da hambre, que sea proteína muy magra: ${portion('claras', Math.min(left.p, 20)).txt} o ${portion('atun', 25).txt}.`);
-    items.push(`Una caminata de 30–40 min compensa ~${r(150)}–${r(200)} kcal. No intentes "pagarlo" mañana comiendo muy poco: vuelve a tu meta normal.`);
+  // Se pasó de calorías → ejercicio + cerrar el día liviano
+  if (left.kcal < -Math.max(80, t.kcal_target * 0.04)) {
+    const over = -left.kcal;
+    const ex = exerciseFor(over, weightKg);
+    items.push(`⚠️ Te pasaste ${r(over)} kcal.`);
+    items.push(`🏃 Compénsalo: camina ${ex.walk} min o trota ${ex.jog} min (y regístralo).`);
+    items.push('🥗 Resto del día: solo verduras, caldos, infusiones y agua.');
     return { tone: 'warn', items };
   }
 
-  const allOk = near(left.kcal, t.kcal_target) && left.p <= t.protein_g * 0.1 && left.c <= t.carbs_g * 0.15 && left.f <= t.fat_g * 0.15;
-  if (allOk) {
-    items.push('¡Vas perfecto! Estás dentro de tu meta de calorías y macros. Si te da hambre, elige verduras o una infusión.');
+  const near = Math.abs(left.kcal) <= t.kcal_target * 0.08;
+  if (near && left.p <= t.protein_g * 0.1) {
+    items.push('✅ ¡Día cumplido! Calorías y proteína en tu meta.');
+    if (left.f < -8 || left.c < -15) items.push('Para cerrar: nada más que agua o infusiones.');
     return { tone: 'ok', items };
   }
 
-  if (meals.length > 1 && left.kcal > 150) items.push(`Te quedan ${r(left.kcal)} kcal para ${meals.length} comidas (${meals.join(', ')}): ~${r(left.kcal / meals.length)} kcal cada una.`);
-  else if (left.kcal > 150) items.push(`Te quedan ${r(left.kcal)} kcal${meals.length ? ` para la ${meals[0]}` : ''}.`);
+  // Calorías que quedan
+  if (left.kcal > 120) items.push(`🍽️ Quedan ${r(left.kcal)} kcal${n > 1 ? ` (~${r(left.kcal / n)} por comida)` : meals[0] ? ` para la ${meals[0]}` : ''}.`);
 
-  // Proteína: lo más importante
+  // Proteína (la prioridad)
   if (left.p > 10) {
-    const perMeal = Math.max(1, meals.length);
-    const need = Math.max(15, Math.min(55, left.p / perMeal)); // lo que corresponde a la próxima comida
-    const lean = left.kcal / Math.max(1, left.p) < 6; // poco margen de calorías por gramo de proteína
-    const plans = (lean ? [['atun', 'claras'], ['claras', 'atun'], ['pollo', 'claras']] : [['pollo', 'yogur'], ['atun', 'huevo'], ['quesillo', 'claras']])
-      .map(([m, e]) => proteinCombo(m, e, need))
-      .map((parts) => ({ txt: parts.map((x) => x.txt).join(' + '), kcal: parts.reduce((a, x) => a + x.kcal, 0), p: parts.reduce((a, x) => a + x.p, 0) }))
-      .filter((o) => o.kcal <= Math.max(left.kcal, 150) * 1.05);
-    const head = perMeal > 1 ? `Te faltan ${r(left.p)} g de proteína (~${r(left.p / perMeal)} g por comida).` : `Te faltan ${r(left.p)} g de proteína.`;
-    if (plans.length) items.push(`${head} Para tu ${meals[0] || 'próxima comida'}: ${plans.slice(0, 2).map((o) => `${o.txt} (+${o.p} g, ~${o.kcal} kcal)`).join(' · o · ')}.`);
-    else items.push(`${head} Queda poco margen de calorías: prioriza claras de huevo o atún al agua, sin carbohidratos ni grasas.`);
-    if (left.p > 60 && perMeal <= 1) items.push('Es mucha proteína para una sola comida: cubre lo que puedas sin forzarte y mañana suma proteína desde el desayuno y la once.');
-    if (lean) items.push('Queda poco margen de calorías para tanta proteína: evita pan, arroz, frituras y aderezos el resto del día.');
-  } else if (left.p <= 0) {
-    items.push('✅ Proteína cumplida.');
+    const need = Math.max(15, Math.min(55, left.p / n));
+    const lean = left.kcal / Math.max(1, left.p) < 6;
+    const plan = proteinCombo(lean ? 'atun' : 'pollo', lean ? 'claras' : 'yogur', need);
+    const alt = portion(lean ? 'claras' : 'atun', need);
+    items.push(`🥩 Faltan ${r(left.p)} g de proteína → ${plan.map((x) => x.txt).join(' + ')} o ${alt.txt}${lean ? ', sin pan ni arroz' : ''}.`);
   }
 
-  // Grasas
-  if (left.f < -5) items.push(`Te pasaste ${r(-left.f)} g de grasas: el resto del día sin frituras, palta, frutos secos ni aceite extra. Prefiere preparaciones al vapor, plancha o cocidas.`);
-  else if (left.f > 15 && left.kcal > 200 && hour >= 14) {
-    items.push(`Te faltan ${r(left.f)} g de grasas saludables: por ejemplo ${portion('palta', Math.min(left.f, 12)).txt} o ${portion('nueces', Math.min(left.f, 12)).txt}.`);
+  // Excesos de grasa o carbohidratos
+  if (left.f < -5) items.push(`🥑 Grasas al tope (+${r(-left.f)} g): nada frito, sin palta ni frutos secos.`);
+  else if (left.c < -10) items.push(`🍞 Carbohidratos al tope (+${r(-left.c)} g): solo proteína y verduras.`);
+  else if (left.c > 40 && left.kcal > 300 && items.length < 3) items.push(`🍞 Quedan ${r(left.c)} g de carbohidratos: ${portion(hour < 12 ? 'avena' : 'arroz', Math.min(left.c, 55)).txt} o fruta.`);
+
+  // Ejercicio
+  if (!trained && hour >= 6 && hour < 21 && items.length < 4) {
+    const ex = exerciseFor(200, weightKg);
+    items.push(`🏃 Sin entreno hoy: ${ex.walk} min de caminata suma ~200 kcal a tu margen.`);
   }
+  if (!meals.length && left.kcal > 300) items.push(`🌙 Ya es tarde: no fuerces comer las ${r(left.kcal)} kcal que quedan.`);
 
-  // Carbohidratos
-  if (left.c < -10) items.push(`Te pasaste ${r(-left.c)} g de carbohidratos: en lo que queda prefiere proteína con verduras, sin pan, arroz, papas ni dulces.`);
-  else if (left.c > 40 && left.kcal > 250) {
-    const o = portion(hour < 12 ? 'avena' : 'arroz', Math.min(left.c, 55));
-    items.push(`Te quedan ${r(left.c)} g de carbohidratos: por ejemplo ${o.txt} o ${portion('platano', 27).txt}. Idealmente cerca de tu entrenamiento.`);
-  }
-
-  if (!meals.length && left.kcal > 300) items.push(`Ya es tarde y te quedan ${r(left.kcal)} kcal. No es necesario completarlas: si no tienes hambre, un déficit un poco mayor también suma.`);
-
-  return { tone: items.some((x) => x.includes('pasaste')) ? 'warn' : 'info', items };
+  return { tone: 'info', items: items.slice(0, 4) };
 }
