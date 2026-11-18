@@ -44,12 +44,13 @@ function readBirth(form) {
 
 // Explica de dónde sale el gasto promedio (fórmula y/o lo aprendido del reloj)
 function learnTxt(p) {
-  const formula = `fórmula ${fmt(C.formulaTdee(p))} (sin ejercicio ${fmt(C.baseNoTraining(p))} + entrenos ${fmt(C.avgTrainingKcal(p))}/día)`;
+  const fac = String(C.ACTIVITY_LEVELS[p.activity_level]?.factor ?? 1.2).replace('.', ',');
+  const formula = `metabolismo basal ${fmt(C.bmr(p))} × ${fac} (actividad diaria) = ${fmt(C.baseNoTraining(p))} en un día sin entreno, + ${fmt(C.avgTrainingKcal(p))}/día de entrenos habituales = ${fmt(C.formulaTdee(p))}`;
   const n = Number(p.learned_days) || 0;
   const w = C.learnedWeight(p);
   if (w >= 1) return `🧠 Gasto promedio aprendido de tu reloj: ${fmt(p.learned_tdee)} kcal/día (${n} días registrados en las últimas 4 semanas). Se actualiza solo cada día.`;
-  if (w > 0) return `🧠 Gasto promedio = ${Math.round(w * 100)}% lo aprendido de tu reloj (${fmt(p.learned_tdee)}, ${n} días) + ${Math.round((1 - w) * 100)}% ${formula}. Con ${C.LEARN_FULL_DAYS} días usará solo tu reloj.`;
-  return `Gasto promedio por ${formula}. Ingresa el gasto total de tu reloj cada día: con ${C.LEARN_MIN_DAYS} días la meta empieza a ajustarse sola (llevas ${n}).`;
+  if (w > 0) return `🧠 Gasto promedio = ${Math.round(w * 100)}% lo aprendido de tu reloj (${fmt(p.learned_tdee)}, ${n} días) + ${Math.round((1 - w) * 100)}% fórmula (${formula}). Con ${C.LEARN_FULL_DAYS} días usará solo tu reloj.`;
+  return `Gasto promedio: ${formula}. Ingresa el gasto total de tu reloj cada día: con ${C.LEARN_MIN_DAYS} días la meta empieza a ajustarse sola (llevas ${n}).`;
 }
 
 // Llama a la función de IA y devuelve el JSON (o lanza un error legible)
