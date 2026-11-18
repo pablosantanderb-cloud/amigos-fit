@@ -36,15 +36,12 @@ async function callAI(body) {
   return data;
 }
 
-// Selector de foto: cámara o galería (dos inputs, porque "capture" obliga a usar la cámara)
+// Selector de foto: un solo botón. Sin "capture", el teléfono ofrece Cámara, Fototeca o Archivos.
 const photoPicker = (id, title, sub) => `
   <div class="photo-drop" id="${id}-drop">
     <div id="${id}-ph"><div style="font-size:2.2rem">📷</div><div><b>${title}</b></div><div class="small">${sub}</div></div>
   </div>
-  <div class="grid2" style="margin-top:8px">
-    <label class="btn ghost" style="margin:0">📷 Cámara<input id="${id}-cam" type="file" accept="image/*" capture="environment" class="vh"></label>
-    <label class="btn ghost" style="margin:0">🖼️ Galería<input id="${id}-gal" type="file" accept="image/*" class="vh"></label>
-  </div>`;
+  <label class="btn ghost block" style="margin:8px 0 0">📷 Cargar foto<input id="${id}-gal" type="file" accept="image/*" class="vh"></label>`;
 function bindPhotoPicker(id, onPick, max) {
   const handler = async (ev) => {
     const file = ev.target.files?.[0];
@@ -56,7 +53,6 @@ function bindPhotoPicker(id, onPick, max) {
       onPick(img);
     } catch (e) { toast(e.message, true); }
   };
-  $(`#${id}-cam`).onchange = handler;
   $(`#${id}-gal`).onchange = handler;
   $(`#${id}-drop`).onclick = () => $(`#${id}-gal`).click();
 }
@@ -711,7 +707,7 @@ async function viewRegister() {
     <input id="meal" type="hidden" value="${defaultMeal()}">
     <label>Fecha</label><input id="date" type="date" value="${state.date}" max="${C.isoDate()}">
     <label>Foto (recomendada)</label>
-    ${photoPicker('food', 'Toma una foto o elige una de tu galería', 'la foto mejora la estimación de porciones')}
+    ${photoPicker('food', 'Foto del plato', 'la foto mejora la estimación de porciones')}
     <label>¿Qué comiste? <span class="muted">(obligatorio si no hay foto)</span></label>
     <textarea id="comment" maxlength="500" placeholder="Ej: 2 huevos duros y una marraqueta con palta. Con foto puedes agregar detalles: 'le eché 1 cucharada de aceite', 'me comí la mitad'."></textarea>
     <button id="analyze" class="btn block" style="margin-top:12px">✨ Analizar con IA</button>
