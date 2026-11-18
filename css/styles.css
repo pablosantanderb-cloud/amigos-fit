@@ -223,3 +223,19 @@ table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
 .tr-h { display: flex; flex-direction: column; margin-bottom: 6px; }
 .tr-total { margin-top: 6px; color: var(--accent); font-weight: 600; }
 .trainrow .grid2 select { margin-top: 2px; }
+
+.tut { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 20px; }
+.tut-card { position: relative; width: 100%; max-width: 380px; background: var(--card); border-radius: 22px; padding: 28px 22px 20px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,.35); animation: tutIn .25s ease; }
+@keyframes tutIn { from { transform: translateY(14px); opacity: 0; } to { transform: none; opacity: 1; } }
+.tut-icon { font-size: 3.2rem; line-height: 1; margin-bottom: 10px; }
+.tut-card h2 { font-size: 1.3rem; margin-bottom: 8px; }
+.tut-card p { color: var(--muted); font-size: 1rem; min-height: 96px; }
+.tut-card p b { color: var(--text); }
+.tut-dots { display: flex; justify-content: center; gap: 6px; margin: 14px 0; }
+.tut-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
+.tut-dots i.on { background: var(--accent); width: 20px; border-radius: 99px; }
+.tut-nav { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
+.tut-x { position: absolute; top: 10px; right: 12px; background: none; border: 0; color: var(--muted); font-size: 1.2rem; cursor: pointer; }
+.tut { background: rgba(0,0,0,.72); }
+.tut-card { border: 1px solid var(--line); }
+@media (prefers-color-scheme: dark) { .tut-card { background: #1f2834; border-color: #334155; } }

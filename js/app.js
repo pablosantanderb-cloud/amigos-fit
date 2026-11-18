@@ -227,6 +227,7 @@ async function route() {
   try { if (!profile) await loadProfile(); }
   catch (e) { app.innerHTML = `<div class="card err">Error cargando perfil: ${esc(e.message)}</div>`; return; }
 
+  if (profile && !profile.tutorial_done && !tutorialOpen) showTutorial(true);
   if (!profileComplete() && name !== 'perfil') { location.hash = '#/perfil'; return; }
 
   nav.classList.toggle('hidden', !profileComplete());
@@ -237,6 +238,62 @@ async function route() {
   app.innerHTML = '<div class="loading">Cargando…</div>';
   try { await v(); window.scrollTo(0, 0); }
   catch (e) { console.error(e); app.innerHTML = `<div class="card err">Ocurrió un error: ${esc(e.message)}</div>`; }
+}
+
+// ---------------------------------------------------------------- TUTORIAL
+const TUTORIAL = [
+  { icon: '👋', title: 'Bienvenido/a a Amigos Fit', text: 'Registra lo que comes y entrenas, sigue tu progreso y compárate con tus amigos. Te mostramos lo principal en 1 minuto.' },
+  { icon: '🎯', title: 'Tu meta diaria', text: 'Con tus datos del <b>Perfil</b> calculamos cuántas calorías y proteínas, carbohidratos y grasas te tocan cada día para tu objetivo.' },
+  { icon: '📷', title: 'Registra tus comidas', text: 'En <b>Registrar</b> sube una foto del plato o escribe lo que comiste (ej: “2 huevos duros”). La IA calcula calorías y macros, y puedes corregirlos antes de guardar.' },
+  { icon: '🏃', title: 'Entrenamientos', text: 'En <b>Hoy → ➕ Agregar entrenamiento</b>, a mano o con un pantallazo de tu reloj. Si entrenas, tu meta del día sube para mantener tu déficit.' },
+  { icon: '💡', title: 'Tu coach', text: 'Bajo tus macros verás sugerencias breves: qué comer en lo que queda del día o qué ejercicio hacer si te pasaste. En días pasados te dice cómo te fue.' },
+  { icon: '⌚', title: 'Cierre del día con tu reloj', text: 'Al día siguiente ingresa el <b>gasto total</b> de tu reloj (energía activa + en reposo). Así ves tu déficit real, y con 7 días tu meta aprende de tu gasto verdadero.' },
+  { icon: '👥', title: 'Compite con amigos', text: 'En <b>Amigos</b> crea un grupo y comparte el código. El ranking premia la constancia y cumplir tus metas, no solo los kilos. Tus fotos y comidas son privadas.' },
+  { icon: '🚀', title: '¡Listo!', text: 'Empieza completando tu perfil y registrando tu próxima comida. Puedes volver a ver este tutorial cuando quieras desde <b>Perfil</b>.' },
+];
+let tutorialOpen = false;
+
+function showTutorial(firstTime) {
+  if (tutorialOpen) return;
+  tutorialOpen = true;
+  let i = 0;
+  const el = document.createElement('div');
+  el.className = 'tut';
+  document.body.appendChild(el);
+  document.body.style.overflow = 'hidden';
+  const close = async () => {
+    el.remove(); document.body.style.overflow = ''; tutorialOpen = false;
+    if (firstTime && profile && !profile.tutorial_done) {
+      profile.tutorial_done = true;
+      await sb.from('profiles').update({ tutorial_done: true }).eq('id', session.user.id);
+    }
+  };
+  const render = () => {
+    const sl = TUTORIAL[i];
+    const last = i === TUTORIAL.length - 1;
+    el.innerHTML = `<div class="tut-card" role="dialog" aria-modal="true">
+      ${firstTime ? '' : '<button class="tut-x" aria-label="Cerrar">✕</button>'}
+      <div class="tut-icon">${sl.icon}</div>
+      <h2>${sl.title}</h2>
+      <p>${sl.text}</p>
+      <div class="tut-dots">${TUTORIAL.map((_, k) => `<i class="${k === i ? 'on' : ''}"></i>`).join('')}</div>
+      <div class="tut-nav">
+        <button class="btn ghost" data-t="prev" ${i === 0 ? 'style="visibility:hidden"' : ''}>Atrás</button>
+        <button class="btn" data-t="next">${last ? (firstTime ? '¡Empezar!' : 'Cerrar') : 'Siguiente'}</button>
+      </div></div>`;
+    el.querySelector('[data-t=prev]').onclick = () => { if (i > 0) { i--; render(); } };
+    el.querySelector('[data-t=next]').onclick = () => { if (last) close(); else { i++; render(); } };
+    const x = el.querySelector('.tut-x'); if (x) x.onclick = close;
+  };
+  // deslizar con el dedo
+  let x0 = null;
+  el.addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; }, { passive: true });
+  el.addEventListener('touchend', (e) => {
+    if (x0 == null) return;
+    const dx = e.changedTouches[0].clientX - x0; x0 = null;
+    if (dx < -50 && i < TUTORIAL.length - 1) { i++; render(); } else if (dx > 50 && i > 0) { i--; render(); }
+  });
+  render();
 }
 
 // ---------------------------------------------------------------- AUTH
@@ -391,6 +448,7 @@ async function viewProfile() {
       <input name="p" type="password" minlength="6" placeholder="Nueva contraseña" autocomplete="new-password" required>
       <button class="btn ghost">Cambiar</button>
     </form>
+    <button id="tutorialBtn" class="btn ghost block" style="margin-top:12px">🎓 Ver tutorial de la app</button>
     <button id="logout" class="btn danger block" style="margin-top:12px">Cerrar sesión</button>
   </div>
   <p class="small muted">Las calorías y macros son estimaciones generales y no reemplazan la evaluación de un/a nutricionista o médico.</p>`}`;
@@ -477,6 +535,7 @@ async function viewProfile() {
   };
 
   if (!first) {
+    $('#tutorialBtn').onclick = () => showTutorial(false);
     $('#logout').onclick = async () => { await sb.auth.signOut(); location.hash = '#/login'; };
     $('#pw').onsubmit = async (ev) => {
       ev.preventDefault();

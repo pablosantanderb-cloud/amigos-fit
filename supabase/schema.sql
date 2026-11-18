@@ -124,6 +124,8 @@ alter table public.profiles add column if not exists train_mod_minutes int;
 alter table public.profiles add column if not exists train_int_sessions int;
 alter table public.profiles add column if not exists train_int_minutes int;
 
+alter table public.profiles add column if not exists tutorial_done boolean default false;
+
 -- ---------- GRUPOS ----------
 create table if not exists public.groups (
   id          uuid primary key default gen_random_uuid(),
