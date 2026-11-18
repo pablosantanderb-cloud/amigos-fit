@@ -264,6 +264,16 @@ language sql stable security definer set search_path = public as $$
   order by x.log_date;
 $$;
 
+-- ---------- PERMISOS DE LA DATA API ----------
+-- Explícitos, por si el proyecto se creó sin "Automatically expose new tables".
+-- Solo el rol "authenticated" (usuarios logueados); RLS sigue filtrando qué filas ve cada uno.
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on public.profiles, public.food_logs, public.weight_logs, public.activity_logs to authenticated;
+grant select, update, delete on public.groups to authenticated;
+grant select, delete on public.group_members to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+grant execute on function public.is_member(uuid) to authenticated;
+grant execute on function public.is_groupmate(uuid) to authenticated;
 grant execute on function public.create_group(text) to authenticated;
 grant execute on function public.join_group(text) to authenticated;
 grant execute on function public.group_leaderboard(uuid, date, date) to authenticated;
