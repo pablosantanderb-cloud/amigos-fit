@@ -813,7 +813,7 @@ async function viewToday() {
       : `🎯 Meta = gasto estimado ${fmt(plan.planned.kcal)} (base ${fmt(C.dayBase(P))}${actKcal ? ` + entreno ${fmt(actKcal)}` : ''}) − ${defTxt} objetivo.`}
       ${plan.manual || C.isFixedMode(P) || actKcal || plan.live ? '' : 'Sin entreno registrado: si entrenas, tu meta sube.'}</p>
     ${hasSync && isToday ? `<div class="live row between">
-      <span class="small">${plan.live ? `⌚ Reloj: ${fmt(plan.live.active)} kcal activas · actualizado ${agoTxt(plan.live.at)}` : '⌚ Aún sin datos del reloj hoy'}</span>
+      <span class="small">${plan.live ? `⌚ Reloj: ${fmt(plan.live.active)} kcal activas${watch?.exercise_min != null ? ` · ${fmt(watch.exercise_min)} min ejercicio` : ''} · actualizado ${agoTxt(plan.live.at)}` : '⌚ Aún sin datos del reloj hoy'}</span>
       <a class="btn ghost sm" href="${shortcutUrl()}">🔄 Actualizar</a></div>` : ''}
     ${macroBar('🥩 Proteínas', tot.protein_g, plan.protein_g, COLORS.prot)}
     ${macroBar('🍞 Carbohidratos', tot.carbs_g, plan.carbs_g, COLORS.carb)}
@@ -850,6 +850,7 @@ async function viewToday() {
 
   <div class="card">
     <h2>🏃 Entrenamientos</h2>
+    ${watch?.exercise_min != null ? `<div class="exmin">⌚ <b>${fmt(watch.exercise_min)} min</b> de ejercicio según Salud${isToday && watch.live_at ? ` <span class="muted">· actualizado ${agoTxt(watch.live_at)}</span>` : ''}</div>` : ''}
     ${(acts.data || []).map((a) => `<div class="row between food">${workoutIcon(a.activity)}<div class="info"><div class="name">${a.source === 'reloj' ? '⌚ ' : ''}${esc(a.activity)}</div>
       <div class="mac">${a.source === 'manual' && a.kcal_burned ? '' : `${a.minutes} min · `}${a.kcal_burned ? `${fmt(a.kcal_burned)} kcal activas` : ''}${a.steps ? ` · ${fmt(a.steps)} pasos` : ''}${a.distance_km ? ` · ${dec(r1(a.distance_km))} km` : ''} · ${C.isFixedMode(P) ? `~${fmt(C.activityKcal(P, a))} kcal (ya incluido en tu meta)` : `suma ${fmt(C.activityKcal(P, a))} kcal a tu meta`}</div></div>
       <button class="icon-btn" data-delact="${a.id}">🗑️</button></div>`).join('') || `<p class="muted small">Sin entrenamientos ${isToday ? 'hoy' : 'este día'}.</p>`}
@@ -1328,7 +1329,7 @@ async function viewProgress() {
     sb.from('food_logs').select('log_date,kcal,protein_g,carbs_g,fat_g').gte('log_date', qFrom).lte('log_date', to),
     sb.from('weight_logs').select('log_date,weight_kg,waist_cm').order('log_date'),
     sb.from('activity_logs').select('log_date,minutes,kcal_burned').gte('log_date', qFrom).lte('log_date', to),
-    sb.from('daily_energy').select('log_date,total_kcal,active_kcal,resting_kcal,kcal_target_manual').gte('log_date', qFrom).lte('log_date', to),
+    sb.from('daily_energy').select('log_date,total_kcal,active_kcal,resting_kcal,kcal_target_manual,exercise_min').gte('log_date', qFrom).lte('log_date', to),
   ]);
   if (food.error) throw food.error;
   const P = profile;
@@ -1358,6 +1359,8 @@ async function viewProgress() {
   const kcalOk = logged.filter(inTarget).length;
   const protOk = logged.filter((d) => daily[d].protein_g >= P.protein_g * 0.9).length;
   const avg = (k) => (logged.length ? logged.reduce((a, d) => a + daily[d][k], 0) / logged.length : 0);
+  // minutos de actividad del día: el mayor entre los entrenos registrados y los minutos de ejercicio de Salud
+  allDays.forEach((d) => { const x = daily[d]; x.act = Math.max(x.act, Number(x.watch?.exercise_min) || 0); });
   const totalAct = days.reduce((a, d) => a + daily[d].act, 0);
 
   const ws = weights.data || [];

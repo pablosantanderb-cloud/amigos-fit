@@ -14,7 +14,7 @@ for (let i = 0; i < 20; i++) {
   db.food_logs.push({ id: id++, user_id: uid, log_date: day(-i), meal: 'desayuno', description: 'Avena con plátano', comment: 'con leche descremada', items: [{name:'Avena',kcal:225,protein_g:8,carbs_g:40,fat_g:4},{name:'Plátano',kcal:105,protein_g:1,carbs_g:27,fat_g:0},{name:'Leche descremada',kcal:120,protein_g:11,carbs_g:3,fat_g:5}], kcal: 450, protein_g: 20, carbs_g: 70, fat_g: 9, created_at: '' });
   if (i % 3 === 0) db.weight_logs.push({ id: id++, user_id: uid, log_date: day(-i), weight_kg: 88 + i*0.1 });
   if (i % 2 === 0) db.activity_logs.push({ id: id++, user_id: uid, log_date: day(-i), activity: 'Caminar', minutes: 40, kcal_burned: 250 });
-  if (i === 0) db.daily_energy.push({ id: id++, user_id: uid, log_date: day(0), live_active_kcal: 1100, live_resting_kcal: 1320, live_at: new Date(Date.now()-25*60000).toISOString() });
+  if (i === 0) db.daily_energy.push({ id: id++, user_id: uid, log_date: day(0), live_active_kcal: 1100, live_resting_kcal: 1320, exercise_min: 64, live_at: new Date(Date.now()-25*60000).toISOString() });
   if (i >= 1 && i <= 9) db.daily_energy.push({ id: id++, user_id: uid, log_date: day(-i), total_kcal: 2700, active_kcal: 800, resting_kcal: 1900 });
 }
 db.weight_logs.sort((a,b)=>a.log_date.localeCompare(b.log_date));

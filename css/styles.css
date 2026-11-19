@@ -364,3 +364,5 @@ table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
 .meta-form { margin-top: 10px; padding: 10px; background: var(--bg); border-radius: 12px; }
 .meta-form .row { gap: 8px; }
 .meta-form input { flex: 1; }
+
+.exmin { font-size: .85rem; padding: 8px 10px; background: var(--bg); border-radius: 10px; margin-bottom: 6px; }

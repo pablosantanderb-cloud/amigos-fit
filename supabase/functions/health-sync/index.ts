@@ -1,7 +1,7 @@
 // Supabase Edge Function: health-sync
 // Recibe desde un Atajo de iPhone las kcal del día leídas de Apple Salud y las guarda como "cierre del día".
 // Autenticación: código personal (sync_tokens) — sin sesión, para que el Atajo pueda correr solo.
-// Cuerpo JSON: { token, active_kcal, resting_kcal, total_kcal?, day?: "hoy" | "ayer" | "YYYY-MM-DD" }
+// Cuerpo JSON: { token, active_kcal, resting_kcal, exercise_min?, total_kcal?, day?: "hoy" | "ayer" | "YYYY-MM-DD" }
 
 const URL_ = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -76,12 +76,17 @@ async function handle(req: Request): Promise<Response> {
   const modo = String(b.modo ?? "").toLowerCase() || (date < chileDate(0) || hh * 60 + mm >= 23 * 60 + 30 ? "cierre" : "en_vivo");
 
   const row: Record<string, unknown> = { user_id: userId, log_date: date, live_active_kcal: active, live_resting_kcal: resting, live_at: new Date().toISOString() };
-  let msg = `🔄 Amigos Fit: datos de hoy actualizados (activa ${active}, reposo ${resting} kcal)`;
+  // Minutos de ejercicio de Salud (opcional; si el Atajo no los manda, no se tocan)
+  const exRaw = num(b.exercise_min);
+  const exMin = Number.isFinite(exRaw) ? Math.max(0, Math.min(1440, Math.round(exRaw))) : null;
+  if (exMin != null) row.exercise_min = exMin;
+  const exTxt = exMin != null ? `, ${exMin} min de ejercicio` : "";
+  let msg = `🔄 Amigos Fit: datos de hoy actualizados (activa ${active}, reposo ${resting} kcal${exTxt})`;
   if (modo === "cierre") {
     const total = Math.round(num(b.total_kcal)) || active + resting;
     if (!(total >= 500 && total <= 10000)) return json({ error: `Total fuera de rango (${total} kcal). Revisa que el Atajo envíe energía activa y en reposo.` }, 400);
     Object.assign(row, { total_kcal: total, active_kcal: active || null, resting_kcal: resting || null, source: "salud" });
-    msg = `✅ Amigos Fit: cierre del ${date} guardado — total ${total} kcal (activa ${active}, reposo ${resting})`;
+    msg = `✅ Amigos Fit: cierre del ${date} guardado — total ${total} kcal (activa ${active}, reposo ${resting}${exTxt})`;
   }
 
   const up = await rest("daily_energy?on_conflict=user_id,log_date", {
