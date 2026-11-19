@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=20';
+import * as C from './calc.js?v=21';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -794,17 +794,24 @@ async function viewToday() {
   <div class="card">
     ${gauge(tot.kcal, target)}
     <div class="kpis kpis3">
-      <div><span class="muted">Meta</span><b>${fmt(target)}</b></div>
+      <button type="button" id="metaBtn" class="meta-btn${plan.manual ? ' manual' : ''}" title="Editar la meta de este día"><span class="muted">Meta ✏️</span><b>${fmt(target)}</b>${plan.manual ? '<small>a mano</small>' : ''}</button>
       <div><span class="muted">Consumido</span><b>${fmt(tot.kcal)}</b></div>
       <div><span class="muted">${remaining >= 0 ? 'Te quedan' : 'Te pasaste'}</span>
         <b style="color:${remaining >= 0 ? 'var(--accent)' : 'var(--danger)'}">${fmt(Math.abs(remaining))}</b></div>
     </div>
-    <p class="small muted" style="margin:10px 0 0">${C.isFixedMode(P)
+    <form id="metaForm" class="meta-form" hidden>
+      <label style="margin-top:0">Meta de calorías para ${isToday ? 'hoy' : 'este día'}</label>
+      <div class="row"><input id="metaIn" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${target}" placeholder="Ej: 2200">
+        <button class="btn sm" type="submit">Guardar</button></div>
+      <p class="small muted" style="margin:6px 0 0">Solo cambia ${isToday ? 'hoy' : 'este día'}. La automática sería <b>${fmt(plan.auto_target)}</b> kcal. Las proteínas y grasas se mantienen; los carbohidratos se ajustan.</p>
+      ${plan.manual ? '<button type="button" id="metaAuto" class="btn ghost sm" style="margin-top:6px">↩️ Volver a la meta automática</button>' : ''}
+    </form>
+    <p class="small muted" style="margin:10px 0 0">${plan.manual ? `🎯 Meta puesta a mano para ${isToday ? 'hoy' : 'este día'} (la automática sería ${fmt(plan.auto_target)}). Toca «Meta» para cambiarla.` : C.isFixedMode(P)
       ? `🎯 Meta fija = gasto promedio ${fmt(C.tdee(P))} (incluye tu ejercicio semanal promedio) − ${defTxt} objetivo. Los entrenos no la cambian.`
       : plan.live && plan.live.kcal - plan.deficit >= plan.planned.kcal - plan.deficit
       ? `🎯 Meta = gasto según tu reloj ${fmt(plan.live.kcal)} (reposo proyectado ${fmt(plan.live.restFull)} + ${P.exercise_credit_pct ?? C.DEFAULT_CREDIT}% de ${fmt(plan.live.active)} activas) − ${defTxt} objetivo.`
       : `🎯 Meta = gasto estimado ${fmt(plan.planned.kcal)} (base ${fmt(C.dayBase(P))}${actKcal ? ` + entreno ${fmt(actKcal)}` : ''}) − ${defTxt} objetivo.`}
-      ${C.isFixedMode(P) || actKcal || plan.live ? '' : 'Sin entreno registrado: si entrenas, tu meta sube.'}</p>
+      ${plan.manual || C.isFixedMode(P) || actKcal || plan.live ? '' : 'Sin entreno registrado: si entrenas, tu meta sube.'}</p>
     ${hasSync && isToday ? `<div class="live row between">
       <span class="small">${plan.live ? `⌚ Reloj: ${fmt(plan.live.active)} kcal activas · actualizado ${agoTxt(plan.live.at)}` : '⌚ Aún sin datos del reloj hoy'}</span>
       <a class="btn ghost sm" href="${shortcutUrl()}">🔄 Actualizar</a></div>` : ''}
@@ -926,6 +933,22 @@ async function viewToday() {
     $('#af').classList.toggle('hidden', b.dataset.at !== 'manual');
   }));
 
+  $('#metaBtn').onclick = () => { const f = $('#metaForm'); f.hidden = !f.hidden; if (!f.hidden) { $('#metaIn').focus(); $('#metaIn').select(); } };
+  const saveMeta = async (val) => {
+    const { error } = watch
+      ? await sb.from('daily_energy').update({ kcal_target_manual: val }).eq('log_date', d)
+      : await sb.from('daily_energy').insert({ user_id: uid, log_date: d, kcal_target_manual: val, source: 'manual' });
+    if (error) return toast(error.message, true);
+    toast(val ? `Meta de ${isToday ? 'hoy' : 'este día'}: ${fmt(val)} kcal ✅` : 'Meta automática restaurada'); route();
+  };
+  $('#metaForm').onsubmit = (ev) => {
+    ev.preventDefault();
+    const v = parseInt($('#metaIn').value, 10);
+    if (!(v >= 800 && v <= 8000)) return toast('Ingresa una meta entre 800 y 8000 kcal', true);
+    saveMeta(v === plan.auto_target && !plan.manual ? null : v);
+  };
+  if ($('#metaAuto')) $('#metaAuto').onclick = () => saveMeta(null);
+
   $('#prev').onclick = () => { state.date = C.addDays(d, -1); route(); };
   $('#next').onclick = () => { if (d < C.isoDate()) { state.date = C.addDays(d, 1); route(); } };
 
@@ -1009,7 +1032,9 @@ async function viewToday() {
   };
   if ($('#delEnergy')) $('#delEnergy').onclick = async (ev) => {
     ev.preventDefault();
-    const { error } = await sb.from('daily_energy').delete().eq('log_date', d);
+    const { error } = watch?.kcal_target_manual
+      ? await sb.from('daily_energy').update({ total_kcal: null, active_kcal: null, resting_kcal: null }).eq('log_date', d)
+      : await sb.from('daily_energy').delete().eq('log_date', d);
     if (error) return toast(error.message, true);
     route();
   };
@@ -1303,7 +1328,7 @@ async function viewProgress() {
     sb.from('food_logs').select('log_date,kcal,protein_g,carbs_g,fat_g').gte('log_date', qFrom).lte('log_date', to),
     sb.from('weight_logs').select('log_date,weight_kg,waist_cm').order('log_date'),
     sb.from('activity_logs').select('log_date,minutes,kcal_burned').gte('log_date', qFrom).lte('log_date', to),
-    sb.from('daily_energy').select('log_date,total_kcal,active_kcal,resting_kcal').gte('log_date', qFrom).lte('log_date', to),
+    sb.from('daily_energy').select('log_date,total_kcal,active_kcal,resting_kcal,kcal_target_manual').gte('log_date', qFrom).lte('log_date', to),
   ]);
   if (food.error) throw food.error;
   const P = profile;
@@ -1318,7 +1343,7 @@ async function viewProgress() {
   (food.data || []).forEach((l) => { const x = daily[l.log_date]; if (!x) return; x.kcal += +l.kcal; x.protein_g += +l.protein_g; x.carbs_g += +l.carbs_g; x.fat_g += +l.fat_g; x.n++; });
   (acts.data || []).forEach((a) => { if (daily[a.log_date]) { daily[a.log_date].act += a.minutes; daily[a.log_date].burn += C.activityKcal(P, a); } });
   const totalBurn = days.reduce((a, d) => a + daily[d].burn, 0);
-  allDays.forEach((d) => { const x = daily[d]; const e = C.dayExpenditure(P, x.burn, x.watch); x.spent = e.kcal; x.src = e.source; x.target = C.dayTarget(P, x.burn); });
+  allDays.forEach((d) => { const x = daily[d]; const e = C.dayExpenditure(P, x.burn, x.watch); x.spent = e.kcal; x.src = e.source; x.target = C.dayTarget(P, x.burn, x.watch?.kcal_target_manual); });
   const inTarget = (d) => Math.abs(daily[d].kcal - daily[d].target) <= daily[d].target * 0.1;
   const balanceSum = days.filter((d) => daily[d].n > 0).reduce((a, d) => a + (daily[d].kcal - daily[d].spent), 0);
   const watchDays = days.filter((d) => daily[d].n > 0 && daily[d].src === 'reloj').length;

@@ -228,8 +228,11 @@ export function dayPlan(p, exerciseKcal, watch) {
   const live = liveExpenditure(p, watch);
   if (live && !isFixedMode(p)) kcal = Math.max(kcal, Math.round(live.kcal - deficit));
   if (deficit > 0) kcal = Math.max(Math.round(floor), kcal);
+  const auto = kcal;
+  const manual = Number(watch?.kcal_target_manual) || 0; // meta puesta a mano para este día
+  if (manual > 0) kcal = Math.round(manual);
   const carbs_g = Math.max(0, Math.round((kcal - p.protein_g * 4 - p.fat_g * 9) / 4));
-  return { kcal_target: kcal, protein_g: p.protein_g, carbs_g, fat_g: p.fat_g, planned, spent, deficit, live, delta: kcal - (p.kcal_target || 0) };
+  return { kcal_target: kcal, auto_target: auto, manual: manual > 0, protein_g: p.protein_g, carbs_g, fat_g: p.fat_g, planned, spent, deficit, live, delta: kcal - (p.kcal_target || 0) };
 }
 
 /**
@@ -249,8 +252,8 @@ export function liveExpenditure(p, watch) {
 }
 
 /** Meta de ingesta del día (ver dayPlan; no depende del cierre del reloj) */
-export function dayTarget(p, exerciseKcal = 0) {
-  return dayPlan(p, exerciseKcal, null).kcal_target;
+export function dayTarget(p, exerciseKcal = 0, manual = null) {
+  return Number(manual) > 0 ? Math.round(manual) : dayPlan(p, exerciseKcal, null).kcal_target;
 }
 
 /**
