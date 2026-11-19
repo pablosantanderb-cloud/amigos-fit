@@ -831,12 +831,12 @@ async function viewToday() {
     ${byMeal.length ? byMeal.map((g) => `
       <div class="meal-h"><span>${MEALS[g.m]}</span><span>${fmt(C.sumLogs(g.items).kcal)} kcal</span></div>
       ${g.items.map((l) => `
-        <div class="food">
+        <div class="food food-card">
           ${l.photo_path && urls[l.photo_path] ? `<img src="${esc(urls[l.photo_path])}" alt="">` : '<div class="ph">🍽️</div>'}
           <div class="info"><div class="name">${esc(l.description || 'Comida')}</div>
-            <div class="mac">${fmt(l.kcal)} kcal · P ${r0(l.protein_g)} · C ${r0(l.carbs_g)} · G ${r0(l.fat_g)}</div>
-            ${l.comment ? `<div class="mac">“${esc(l.comment)}”</div>` : ''}</div>
-          <button class="icon-btn" data-del="${l.id}" title="Eliminar">🗑️</button>
+            <div class="mac"><b>${fmt(l.kcal)} kcal</b> · P ${r0(l.protein_g)} · C ${r0(l.carbs_g)} · G ${r0(l.fat_g)}</div></div>
+          <div class="food-btns"><button class="icon-btn" data-edit="${l.id}" title="Editar">✏️</button><button class="icon-btn" data-del="${l.id}" title="Eliminar">🗑️</button></div>
+          ${foodItemsTable(l)}
         </div>`).join('')}`).join('')
       : `<p class="muted">Aún no registras comidas ${isToday ? 'hoy' : 'este día'}. Toma una foto de tu plato 📸</p>`}
   </div>
@@ -929,6 +929,10 @@ async function viewToday() {
   $('#prev').onclick = () => { state.date = C.addDays(d, -1); route(); };
   $('#next').onclick = () => { if (d < C.isoDate()) { state.date = C.addDays(d, 1); route(); } };
 
+  $$('[data-edit]').forEach((b) => (b.onclick = () => {
+    state.editFood = logs.find((x) => String(x.id) === b.dataset.edit);
+    location.hash = '#/registrar';
+  }));
   $$('[data-del]').forEach((b) => (b.onclick = async () => {
     if (!confirm('¿Eliminar este registro?')) return;
     const l = logs.find((x) => String(x.id) === b.dataset.del);
@@ -1133,6 +1137,18 @@ async function viewToday() {
   };
 }
 
+// Tabla de alimentos de un registro: nombre corto + kcal y las 3 macros de cada uno, y el total
+function foodItemsTable(l) {
+  const its = (Array.isArray(l.items) ? l.items : []).filter((it) => it && (it.name || it.kcal));
+  if (!its.length) return '';
+  const cell = (v) => `<span>${r0(v)}</span>`;
+  return `<div class="fitems">
+    <div class="fi-row fi-head"><span></span><span>kcal</span><span>P</span><span>C</span><span>G</span></div>
+    ${its.map((it) => `<div class="fi-row"><span class="fi-n">${esc(it.name || 'Alimento')}</span>${cell(it.kcal)}${cell(it.protein_g)}${cell(it.carbs_g)}${cell(it.fat_g)}</div>`).join('')}
+    ${its.length > 1 ? `<div class="fi-row fi-tot"><span class="fi-n">Total</span>${cell(l.kcal)}${cell(l.protein_g)}${cell(l.carbs_g)}${cell(l.fat_g)}</div>` : ''}
+  </div>`;
+}
+
 // ---------------------------------------------------------------- REGISTRAR COMIDA
 async function resizeImage(file, max = 1024, quality = 0.82) {
   const url = URL.createObjectURL(file);
@@ -1150,17 +1166,24 @@ async function resizeImage(file, max = 1024, quality = 0.82) {
 }
 
 async function viewRegister() {
+  const editing = state.editFood || null; // registro existente que se está editando
+  state.editFood = null;
   let photos = []; // [{ blob, dataUrl, base64 }] hasta 6
-  let items = [];
-  let meta = { description: '', confidence: null, notes: '' };
+  let items = editing
+    ? ((Array.isArray(editing.items) && editing.items.length) ? editing.items.map((it) => ({ ...it }))
+      : [{ name: editing.description || '', kcal: +editing.kcal || 0, protein_g: +editing.protein_g || 0, carbs_g: +editing.carbs_g || 0, fat_g: +editing.fat_g || 0 }])
+    : [];
+  let meta = { description: editing?.description || '', confidence: editing?.ai_confidence || null, notes: '' };
+  const meal0 = editing ? mealKey(editing.meal) : defaultMeal();
 
   app.innerHTML = `
-  <h1>Registrar comida</h1>
+  <h1>${editing ? '✏️ Editar comida' : 'Registrar comida'}</h1>
+  ${editing ? '<p class="small muted">Corrige los alimentos abajo y guarda. Si quieres que la IA lo recalcule, escribe el detalle (y sube la foto otra vez si quieres que la mire) y toca Analizar.</p>' : ''}
   <div class="card">
     <label style="margin-top:0">Comida</label>
-    <div class="seg" id="mealSeg">${Object.entries(MEALS).map(([k, v]) => `<button type="button" data-meal="${k}" class="${k === defaultMeal() ? 'active' : ''}">${v}</button>`).join('')}</div>
-    <input id="meal" type="hidden" value="${defaultMeal()}">
-    <label>Fecha</label><input id="date" type="date" value="${state.date}" max="${C.isoDate()}">
+    <div class="seg" id="mealSeg">${Object.entries(MEALS).map(([k, v]) => `<button type="button" data-meal="${k}" class="${k === meal0 ? 'active' : ''}">${v}</button>`).join('')}</div>
+    <input id="meal" type="hidden" value="${meal0}">
+    <label>Fecha</label><input id="date" type="date" value="${editing ? editing.log_date : state.date}" max="${C.isoDate()}">
     <label>Fotos (recomendado · hasta 6)</label>
     ${multiPhotoPicker('food', 'Fotos del plato (hasta 6)', 'varios ángulos o cada parte de la comida mejoran la estimación')}
     <label>¿Qué comiste? <span class="muted">(obligatorio si no hay foto)</span></label>
@@ -1168,7 +1191,12 @@ async function viewRegister() {
     <button id="analyze" class="btn block" style="margin-top:12px">✨ Analizar con IA</button>
     <button id="manual" class="btn ghost block" style="margin-top:8px">✍️ Ingresar valores a mano</button>
   </div>
-  <div id="result"></div>`;
+  <div id="result"></div>
+  ${editing ? '<button id="cancelEdit" class="btn ghost block" style="margin-top:8px">Cancelar edición</button>' : ''}`;
+  if (editing) {
+    $('#comment').value = editing.comment || '';
+    $('#cancelEdit').onclick = () => { location.hash = '#/hoy'; };
+  }
 
   bindMultiPhotoPicker('food', (list) => { photos = list; }, 1024);
   $$('#mealSeg button').forEach((b) => (b.onclick = () => {
@@ -1196,7 +1224,7 @@ async function viewRegister() {
       </div>
       <button id="addItem" class="btn ghost sm" style="margin-top:8px">+ Agregar alimento</button>
       <p class="small muted">Puedes corregir cualquier valor antes de guardar.</p>
-      <button id="save" class="btn block" style="margin-top:6px">Guardar en mi registro</button>
+      <button id="save" class="btn block" style="margin-top:6px">${editing ? 'Guardar cambios' : 'Guardar en mi registro'}</button>
     </div>`;
 
     $$('#result .item input').forEach((inp) => (inp.onchange = () => {
@@ -1215,6 +1243,8 @@ async function viewRegister() {
     if (!items.length) items = [{ name: '', kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }];
     renderResult();
   };
+
+  if (editing) renderResult();
 
   $('#analyze').onclick = async () => {
     const comment = $('#comment').value.trim();
@@ -1237,23 +1267,27 @@ async function viewRegister() {
       const valid = items.filter((it) => it.name || it.kcal);
       if (!valid.length) throw new Error('Agrega al menos un alimento');
       const tot = C.sumLogs(valid);
-      let photo_path = null;
+      let photo_path = editing?.photo_path || null;
       if (photos.length) { // se guarda la primera foto como miniatura del registro
         photo_path = `${session.user.id}/${Date.now()}.jpg`;
         const { error } = await sb.storage.from('food-photos').upload(photo_path, photos[0].blob, { contentType: 'image/jpeg' });
-        if (error) { console.warn('No se pudo subir la foto', error); photo_path = null; }
+        if (error) { console.warn('No se pudo subir la foto', error); photo_path = editing?.photo_path || null; }
       }
       const date = $('#date').value || state.date;
-      const { error } = await sb.from('food_logs').insert({
+      const row = {
         log_date: date, meal: $('#meal').value,
         description: ($('#desc').value || valid.map((x) => x.name).join(', ')).slice(0, 200),
         comment: $('#comment').value.trim() || null, photo_path,
         kcal: r0(tot.kcal), protein_g: r1(tot.protein_g), carbs_g: r1(tot.carbs_g), fat_g: r1(tot.fat_g),
         items: valid, ai_confidence: meta.confidence,
-      });
+      };
+      const { error } = editing
+        ? await sb.from('food_logs').update(row).eq('id', editing.id)
+        : await sb.from('food_logs').insert(row);
       if (error) throw error;
+      if (editing?.photo_path && photo_path !== editing.photo_path) await sb.storage.from('food-photos').remove([editing.photo_path]);
       state.date = date;
-      toast('Comida registrada ✅');
+      toast(editing ? 'Cambios guardados ✅' : 'Comida registrada ✅');
       location.hash = '#/hoy';
     } catch (e) { toast(e.message, true); busy(btn, false); }
   }

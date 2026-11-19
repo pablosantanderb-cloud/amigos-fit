@@ -24,6 +24,7 @@ Analiza la comida y estima, para la porción que se va a consumir:
 - estima porciones con referencias visuales (plato ~26 cm, cubiertos, manos, envases).
 - incluye aceites, aderezos, salsas y bebidas visibles o mencionadas.
 - si la imagen no contiene comida, devuelve items vacío y explícalo en notes.
+- el nombre de cada item debe ser corto (1 a 3 palabras, ej. 'Arroz', 'Pechuga de pollo'); la cantidad va solo en quantity.
 Responde en español. Los totales deben ser la suma de los items.`;
 
 const num = { type: "NUMBER" };
@@ -36,7 +37,7 @@ const SCHEMA = {
       items: {
         type: "OBJECT",
         properties: {
-          name: { type: "STRING" },
+          name: { type: "STRING", description: "Nombre CORTO del alimento, 1 a 3 palabras, sin cantidades ni detalles. Ej: 'Marraqueta', 'Palta', 'Huevo duro', 'Aceite de oliva'" },
           quantity: { type: "STRING", description: "ej. '1 taza (200 g)'" },
           grams: num, kcal: num, protein_g: num, carbs_g: num, fat_g: num,
         },
