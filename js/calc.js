@@ -231,7 +231,7 @@ export function dayPlan(p, exerciseKcal, watch) {
   const auto = kcal;
   const manual = Number(watch?.kcal_target_manual) || 0; // meta puesta a mano para este día
   if (manual > 0) kcal = Math.round(manual);
-  const carbs_g = Math.max(0, Math.round((kcal - p.protein_g * 4 - p.fat_g * 9) / 4));
+  const carbs_g = Number(p.carbs_manual) > 0 ? Math.round(Number(p.carbs_manual)) : Math.max(0, Math.round((kcal - p.protein_g * 4 - p.fat_g * 9) / 4));
   return { kcal_target: kcal, auto_target: auto, manual: manual > 0, protein_g: p.protein_g, carbs_g, fat_g: p.fat_g, planned, spent, deficit, live, delta: kcal - (p.kcal_target || 0) };
 }
 
@@ -331,15 +331,25 @@ export function targets(p) {
   // Proteína: g/kg de PESO DE REFERENCIA (ajustado si hay sobrepeso) y nunca más del 30% de las calorías
   const ref = referenceWeight(p);
   const perKg = PROTEIN_PER_KG[p.goal] ?? 1.6;
-  const protein_g = Math.round(Math.min(perKg * ref, (kcal * 0.30) / 4));
+  const auto_protein = Math.round(Math.min(perKg * ref, (kcal * 0.30) / 4));
   const fatShare = p.goal === 'fitness' ? 0.2 : 0.25;
-  const fat_g = Math.round(Math.max(0.6 * ref, (kcal * fatShare) / 9));
-  const carbs_g = Math.max(0, Math.round((kcal - protein_g * 4 - fat_g * 9) / 4));
+  const auto_fat = Math.round(Math.max(0.6 * ref, (kcal * fatShare) / 9));
+  // Macros puestas a mano en el perfil: mandan sobre las automáticas (carbos automáticos = lo que queda)
+  const man = (v) => (Number(v) > 0 ? Math.round(Number(v)) : 0);
+  const protein_g = man(p.protein_manual) || auto_protein;
+  const fat_g = man(p.fat_manual) || auto_fat;
+  const auto_carbs = Math.max(0, Math.round((kcal - protein_g * 4 - fat_g * 9) / 4));
+  const carbs_g = man(p.carbs_manual) || auto_carbs;
+  const macro_kcal = protein_g * 4 + carbs_g * 4 + fat_g * 9;
+  if (man(p.carbs_manual) && Math.abs(macro_kcal - kcal) > kcal * 0.05) {
+    const w = `Tus macros suman ${macro_kcal} kcal y tu meta es ${kcal} kcal: la meta de calorías manda para el balance.`;
+    warning = warning ? `${warning} ${w}` : w;
+  }
 
   const realDeficit = kcal - T;
   const weeklyChangeKg = Math.round(((realDeficit * 7) / KCAL_PER_KG) * 100) / 100;
 
-  return { bmr: B, tdee: T, kcal_target: kcal, protein_g, carbs_g, fat_g, adjust: Math.round(realDeficit), weeklyChangeKg, warning };
+  return { bmr: B, tdee: T, kcal_target: kcal, protein_g, carbs_g, fat_g, auto: { protein_g: auto_protein, carbs_g: auto_carbs, fat_g: auto_fat }, macro_kcal, adjust: Math.round(realDeficit), weeklyChangeKg, warning };
 }
 
 // ---- Hora oficial de la app: Santiago de Chile (independiente de la zona horaria del teléfono)

@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=21';
+import * as C from './calc.js?v=22';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -597,6 +597,16 @@ async function viewProfile() {
     <label class="check" style="margin-top:12px"><input type="checkbox" name="track_creatine" ${p.track_creatine ? 'checked' : ''}> 💊 Tomo creatina: mostrar check diario y recordatorio desde las 17:00</label>
     ${p.calibration_kcal ? `<p class="small">⚖️ Ajuste por calibración con tu balanza: <b>${p.calibration_kcal > 0 ? '+' : ''}${fmt(p.calibration_kcal)} kcal/día</b> en tu gasto base. <a href="#" id="resetCal">Quitar ajuste</a></p>` : ''}
     <div id="calc" class="calc-box"></div>
+    <div id="macroEdit" class="macro-edit" hidden>
+      <b class="small">✏️ Macros a mano</b>
+      <p class="small muted" style="margin:4px 0 6px">Deja un campo vacío para usar el valor automático. Si dejas los carbohidratos en automático, se ajustan solos a tu meta de calorías de cada día.</p>
+      <div class="grid3">
+        <div><label style="margin-top:0">Proteínas (g)</label><input name="protein_manual" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${p.protein_manual ?? ''}"></div>
+        <div><label style="margin-top:0">Carbos (g)</label><input name="carbs_manual" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${p.carbs_manual ?? ''}"></div>
+        <div><label style="margin-top:0">Grasas (g)</label><input name="fat_manual" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${p.fat_manual ?? ''}"></div>
+      </div>
+      <button type="button" id="macroAuto" class="btn ghost sm" style="margin-top:8px">↩️ Volver todo a automático</button>
+    </div>
     <button class="btn block" style="margin-top:14px">${first ? 'Calcular y comenzar' : 'Guardar cambios'}</button>
   </form>
   ${first ? '' : `
@@ -615,11 +625,13 @@ async function viewProfile() {
 
   addEyes(app);
   const form = $('#f');
+  const manualG = (v) => { const n = parseInt(String(v ?? '').replace(/\D/g, ''), 10); return n > 0 && n <= 1000 ? n : null; };
   const read = () => {
     const f = Object.fromEntries(new FormData(form));
     f.birth_date = readBirth(form);
     return { ...f, train_mod_sessions: +f.train_mod_sessions, train_mod_minutes: +f.train_mod_minutes, train_int_sessions: +f.train_int_sessions, train_int_minutes: +f.train_int_minutes, age: C.ageFromBirth(f.birth_date), weight_kg: num(f.weight_kg), height_cm: num(f.height_cm), rate_kg_week: C.usesRate(f.goal) ? +f.rate_kg_week : 0,
       exercise_credit_pct: +f.exercise_credit_pct, calibration_kcal: p.calibration_kcal || 0,
+      protein_manual: manualG(f.protein_manual), carbs_manual: manualG(f.carbs_manual), fat_manual: manualG(f.fat_manual),
       learned_tdee: p.learned_tdee, learned_days: p.learned_days || 0 };
   };
   const valid = (f) => f.sex && f.age >= 12 && f.age <= 100 && f.weight_kg >= 30 && f.weight_kg <= 300 && f.height_cm >= 100 && f.height_cm <= 250;
@@ -650,14 +662,23 @@ async function viewProfile() {
         <p><b>Meta diaria:</b> gasto promedio menos el déficit para tu objetivo. Cada día se ajusta según si entrenaste o no.</p>
         <p><b>Proteína:</b> ${String(C.PROTEIN_PER_KG[f.goal] ?? 1.6).replace('.', ',')} g por kg de tu peso de referencia (${dec(C.referenceWeight(f))} kg${C.referenceWeight(f) < f.weight_kg ? ', tu peso ajustado por IMC: la proteína se calcula para tu músculo, no para la grasa' : ''}), con un tope de 30% de tus calorías. <b>Grasas:</b> 25% de las calorías. <b>Carbohidratos:</b> el resto.</p>
       </details>
-      <div class="grid3">
-        <div><div class="v" style="color:var(--prot)">${t.protein_g} g</div><div class="small muted">Proteínas</div></div>
-        <div><div class="v" style="color:var(--carb)">${t.carbs_g} g</div><div class="small muted">Carbohidratos</div></div>
-        <div><div class="v" style="color:var(--fat)">${t.fat_g} g</div><div class="small muted">Grasas</div></div>
+      <div class="grid3 macro-tap">
+        ${[['protein', 'Proteínas', 'prot'], ['carbs', 'Carbohidratos', 'carb'], ['fat', 'Grasas', 'fat']].map(([k, l, c]) => `<button type="button" data-medit="${k}" class="${f[k + '_manual'] ? 'manual' : ''}">
+          <div class="v" style="color:var(--${c})">${t[k + '_g']} g</div><div class="small muted">${l} ✏️</div>
+          ${f[k + '_manual'] ? `<small>a mano · auto ${t.auto[k + '_g']}</small>` : ''}</button>`).join('')}
       </div>
+      <p class="small muted" style="text-align:center;margin:4px 0 0">Toca una macro para ajustarla a mano.</p>
       ${t.warning ? `<p class="warn">⚠️ ${esc(t.warning)}</p>` : ''}`;
   };
   form.oninput = update; update();
+  // tocar una macro abre el editor (fuera de #calc para no perder lo que se escribe)
+  $('#calc').addEventListener('click', (ev) => {
+    const b = ev.target.closest('[data-medit]'); if (!b) return;
+    const box = $('#macroEdit'); box.hidden = false;
+    const inp = box.querySelector(`[name=${b.dataset.medit}_manual]`); inp.focus(); inp.select();
+  });
+  if (p.protein_manual || p.carbs_manual || p.fat_manual) $('#macroEdit').hidden = false;
+  $('#macroAuto').onclick = () => { ['protein', 'carbs', 'fat'].forEach((k) => { form[`${k}_manual`].value = ''; }); update(); };
 
   form.onsubmit = async (ev) => {
     ev.preventDefault();
@@ -675,6 +696,7 @@ async function viewProfile() {
       train_mod_sessions: f.train_mod_sessions, train_mod_minutes: f.train_mod_minutes, train_int_sessions: f.train_int_sessions, train_int_minutes: f.train_int_minutes,
       start_weight_kg: p.start_weight_kg ?? f.weight_kg,
       bmr: t.bmr, tdee: t.tdee, kcal_target: t.kcal_target, protein_g: t.protein_g, carbs_g: t.carbs_g, fat_g: t.fat_g,
+      protein_manual: f.protein_manual, carbs_manual: f.carbs_manual, fat_manual: f.fat_manual,
       updated_at: new Date().toISOString(),
     };
     const { error } = await sb.from('profiles').update(row).eq('id', session.user.id);
