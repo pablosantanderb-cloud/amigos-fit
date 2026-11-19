@@ -213,9 +213,12 @@ const MEALS = { desayuno: 'Desayuno', almuerzo: 'Almuerzo', once: 'Once', cena: 
 const mealKey = (m) => (m === 'colacion' || m === 'otro' ? 'snack' : m);
 const COLORS = { kcal: '#199407', prot: '#2563eb', carb: '#d97706', fat: '#db2777', target: '#6b7280' };
 // Color fijo de cada amigo, como el logo: Luchin verde, Pabluma amarillo, El kacho rojo
-const PERSON_COLORS = { luchin: '#16a34a', pabluma: '#eab308', 'el kacho': '#ef4444' };
+// Se reconoce por el comienzo del nombre, así sigue funcionando si alguien se cambia el apodo (Luchin → Luchimi)
+const PERSON_COLORS = [[/^luch/, '#16a34a'], [/^pab/, '#eab308'], [/kach/, '#ef4444']];
 function personColor(name = '', i = 0) {
-  return PERSON_COLORS[String(name).trim().toLowerCase()] || PALETTE[(i + 3) % PALETTE.length];
+  const n = String(name).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const hit = PERSON_COLORS.find(([re]) => re.test(n));
+  return hit ? hit[1] : PALETTE[(i + 3) % PALETTE.length];
 }
 const personDot = (name, i) => `<span class="pdot" style="background:${personColor(name, i)}"></span>`;
 const PALETTE = ['#199407', '#2563eb', '#db2777', '#d97706', '#7c3aed', '#0891b2', '#dc2626', '#65a30d', '#c026d3', '#0f766e'];
