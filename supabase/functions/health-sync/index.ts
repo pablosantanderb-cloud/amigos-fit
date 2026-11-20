@@ -95,7 +95,11 @@ async function handle(req: Request): Promise<Response> {
     body: JSON.stringify(row),
   });
   if (!up.ok) { console.error("upsert", up.status, await up.text()); return json({ error: "No se pudo guardar" }, 500); }
-  await rest(`sync_tokens?user_id=eq.${userId}`, { method: "PATCH", body: JSON.stringify({ last_used_at: new Date().toISOString() }) });
+  // Cierre de un día pasado pedido explícitamente (Atajo "Amigos Fit Ayer"): la app sabe que el usuario lo tiene
+  const now = new Date().toISOString();
+  const tokUpd: Record<string, string> = { last_used_at: now };
+  if (b.day != null && date < chileDate(0) && modo === "cierre") tokUpd.yesterday_at = now;
+  await rest(`sync_tokens?user_id=eq.${userId}`, { method: "PATCH", body: JSON.stringify(tokUpd) });
 
   return json({ ok: true, modo, mensaje: msg });
 }

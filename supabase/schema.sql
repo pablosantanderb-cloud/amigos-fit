@@ -936,3 +936,9 @@ left join daily_energy de on de.user_id = d.user_id and de.log_date = d.log_date
 order by m.display_name, d.log_date;
 $$;
 grant execute on function public.group_daily_macros(uuid, date, date) to authenticated;
+
+-- =====================================================================
+-- Migración 020 — respaldo del cierre del día (Atajo "Amigos Fit Ayer")
+-- sync_tokens.yesterday_at: última vez que llegó un cierre de un día pasado pedido con "day"
+-- =====================================================================
+alter table public.sync_tokens add column if not exists yesterday_at timestamptz;

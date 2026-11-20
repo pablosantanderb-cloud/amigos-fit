@@ -83,7 +83,7 @@ const SYNC_URL = `${SUPABASE_URL}/functions/v1/health-sync`;
 async function renderSyncCard() {
   const box = $('#syncCard');
   if (!box) return;
-  const { data: row } = await sb.from('sync_tokens').select('token,last_used_at').maybeSingle();
+  const { data: row } = await sb.from('sync_tokens').select('token,last_used_at,yesterday_at').maybeSingle();
   const copyBtn = (label, value) => `<button type="button" class="btn ghost sm" data-copy="${esc(value)}">📋 ${label}</button>`;
   box.innerHTML = `<h2>⌚ Sincronizar con Apple Salud</h2>
     <p class="small muted">Con un Atajo de iPhone se envía el gasto de tu reloj (energía activa + en reposo): <b>durante el día</b> ajusta tu meta de hoy según lo que te has movido, y <b>a las 23:55</b> queda como cierre del día para tu balance real. El Atajo debe llamarse exactamente <b>“${SHORTCUT_NAME}”</b>.</p>
@@ -108,6 +108,17 @@ async function renderSyncCard() {
         </ol>
         <p class="muted">Si un día el teléfono estaba apagado a esa hora, ingresa ese cierre a mano en Hoy. Correrlo de nuevo el mismo día solo actualiza el dato.</p>
       </details>
+      <details class="small"><summary><b>Respaldo del cierre: Atajo «${SHORTCUT_YESTERDAY}» (recomendado)</b> ${row.yesterday_at ? '✅' : ''}</summary>
+        <p class="muted">Con el iPhone bloqueado, iOS no deja leer Salud y el cierre de las 23:55 puede fallar. Con este Atajo, la primera vez que abres la app en el día, si ayer quedó sin cierre, se cierra solo.</p>
+        <ol class="steps">
+          <li>En <b>Atajos</b>, mantén presionado “${SHORTCUT_NAME}” → <b>Duplicar</b>. Abre la copia y cámbiale el nombre a exactamente <b>“${SHORTCUT_YESTERDAY}”</b>.</li>
+          <li>Arriba de todo agrega <b>Ajustar fecha</b>: <b>Restar 1 días</b> a <b>Fecha actual</b>.</li>
+          <li>En cada <b>Buscar muestras de salud</b> (energía activa, en reposo y minutos de ejercicio si lo tienes): borra los filtros de fecha y deja uno solo: <b>Fecha de inicio · es el ·</b> <i>Fecha ajustada</i> (la variable del paso 2).</li>
+          <li>En <b>Obtener contenido de URL</b> agrega un campo <b>Texto</b>: <code>day</code> = <code>ayer</code>.</li>
+          <li>Si tiene <b>Mostrar resultado</b>, bórralo (así vuelve solo a la app). Al final agrega <b>Ejecutar atajo</b> → “${SHORTCUT_NAME}” (actualiza hoy de paso).</li>
+          <li>Pruébalo una vez con ▶️. Aquí debe aparecer ✅ junto al título y en Hoy de ayer, «⌚ Con el gasto de tu reloj». Desde ahí la app lo usa sola.</li>
+        </ol>
+      </details>
       <button type="button" class="btn ghost sm" id="syncRegen" style="margin-top:10px">🔄 Generar un código nuevo</button>`
     : `<button type="button" class="btn block" id="syncGen">🔑 Generar mi código personal</button>`}`;
   $$('#syncCard [data-copy]').forEach((b) => (b.onclick = async () => {
@@ -127,6 +138,7 @@ async function renderSyncCard() {
 }
 
 const SHORTCUT_NAME = 'Amigos Fit Salud';
+const lsStr = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 const lsNum = (k) => { try { return Number(localStorage.getItem(k)) || 0; } catch { return 0; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch { /* sin almacenamiento */ } };
 // Al volver desde Atajos, recarga Hoy un par de veces mientras llegan los datos del reloj
@@ -137,7 +149,8 @@ document.addEventListener('visibilitychange', () => {
   [1500, 5000].forEach((ms) => setTimeout(() => { if (onHoy()) route(); }, ms));
 });
 // Abre el Atajo y, al terminar, vuelve a Amigos Fit
-const shortcutUrl = () => `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}&x-success=${encodeURIComponent(BASE_URL + '#/hoy')}`;
+const SHORTCUT_YESTERDAY = 'Amigos Fit Ayer';
+const shortcutUrl = (name = SHORTCUT_NAME) => `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(name)}&x-success=${encodeURIComponent(BASE_URL + '#/hoy')}`;
 function agoTxt(iso) {
   const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
   if (m < 1) return 'recién';
@@ -793,7 +806,11 @@ async function viewToday() {
     sb.from('daily_energy').select('*').eq('log_date', d).maybeSingle(),
   ]);
   const creatine = P_creatine() ? await sb.from('supplement_logs').select('id').eq('log_date', d).eq('item', 'creatina').maybeSingle() : { data: null };
-  const syncRow = (await sb.from('sync_tokens').select('last_used_at').maybeSingle()).data;
+  const syncRow = (await sb.from('sync_tokens').select('last_used_at,yesterday_at').maybeSingle()).data;
+  // ¿Quedó ayer sin cierre del reloj? (solo importa si el usuario tiene el Atajo "Amigos Fit Ayer")
+  const yesterdayOpen = syncRow?.yesterday_at && d === C.isoDate()
+    ? !(Number((await sb.from('daily_energy').select('total_kcal').eq('log_date', C.addDays(d, -1)).maybeSingle()).data?.total_kcal) > 0)
+    : false;
   const hasSync = !!syncRow;
   const creatineTaken = !!creatine.data;
   if (food.error) throw food.error;
@@ -1013,7 +1030,14 @@ async function viewToday() {
   // (salta a Atajos y vuelve). Solo si el Atajo ya funcionó alguna vez en los últimos 7 días.
   const liveAge = plan.live ? (Date.now() - new Date(plan.live.at).getTime()) / 60000 : Infinity;
   const shortcutWorks = syncRow?.last_used_at && Date.now() - new Date(syncRow.last_used_at).getTime() < 7 * 86400000;
-  if (hasSync && shortcutWorks && isToday && liveAge > 30 && Date.now() - lsNum('afSyncJump') > 15 * 60000 && document.visibilityState === 'visible') {
+  // Si ayer quedó sin cierre (la automatización de las 23:55 no puede leer Salud con el iPhone bloqueado),
+  // ejecuta "Amigos Fit Ayer", que cierra ayer y luego corre "Amigos Fit Salud" para hoy. Una vez por día.
+  if (yesterdayOpen && isToday && lsStr('afYestJump') !== d && document.visibilityState === 'visible') {
+    lsSet('afYestJump', d);
+    lsSet('afSyncJump', Date.now());
+    state.syncJumpAt = Date.now();
+    location.href = shortcutUrl(SHORTCUT_YESTERDAY);
+  } else if (hasSync && shortcutWorks && isToday && liveAge > 30 && Date.now() - lsNum('afSyncJump') > 15 * 60000 && document.visibilityState === 'visible') {
     lsSet('afSyncJump', Date.now());
     state.syncJumpAt = Date.now();
     location.href = shortcutUrl();
