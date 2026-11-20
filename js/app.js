@@ -1214,6 +1214,21 @@ function foodItemsTable(l) {
   </div>`;
 }
 
+// Alimentos distintos que el usuario ya registró (el más reciente de cada nombre), para que la IA los reutilice
+async function knownFoods() {
+  try {
+    const { data } = await sb.from('food_logs').select('items,created_at').eq('user_id', session.user.id)
+      .gte('log_date', C.addDays(C.isoDate(), -120)).order('created_at', { ascending: false }).limit(400);
+    const seen = new Map();
+    for (const l of data || []) for (const it of Array.isArray(l.items) ? l.items : []) {
+      const key = String(it?.name || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      if (!key || !(Number(it.kcal) > 0) || seen.has(key)) continue;
+      seen.set(key, { name: it.name, quantity: it.quantity || '', grams: it.grams || null, kcal: it.kcal, protein_g: it.protein_g, carbs_g: it.carbs_g, fat_g: it.fat_g });
+    }
+    return [...seen.values()].slice(0, 150);
+  } catch { return []; }
+}
+
 // ---------------------------------------------------------------- REGISTRAR COMIDA
 async function resizeImage(file, max = 1024, quality = 0.82) {
   const url = URL.createObjectURL(file);
@@ -1240,6 +1255,8 @@ async function viewRegister() {
     : [];
   let meta = { description: editing?.description || '', confidence: editing?.ai_confidence || null, notes: '' };
   const meal0 = editing ? mealKey(editing.meal) : defaultMeal();
+  // Alimentos ya registrados (últimos 120 días): la IA reutiliza sus valores si se repiten
+  const knownP = knownFoods();
 
   app.innerHTML = `
   <h1>${editing ? '✏️ Editar comida' : 'Registrar comida'}</h1>
@@ -1280,7 +1297,7 @@ async function viewRegister() {
       <div style="margin-top:8px">
         ${items.map((it, i) => `<div class="item" data-i="${i}">
           <div class="row"><input data-k="name" value="${esc(it.name)}" placeholder="Alimento"><button class="icon-btn" data-rm="${i}" title="Quitar">✕</button></div>
-          ${it.quantity ? `<div class="small muted">${esc(it.quantity)}</div>` : ''}
+          ${it.quantity || it.from_history ? `<div class="small muted">${esc(it.quantity || '')}${it.from_history ? ' <span class="hist">♻️ de tu registro</span>' : ''}</div>` : ''}
           <div class="item-nums">
             ${[['kcal', 'kcal'], ['protein_g', 'Prot g'], ['carbs_g', 'Carb g'], ['fat_g', 'Grasa g']].map(([k, l]) => `<div><span class="small muted">${l}</span>
               <input data-k="${k}" type="text" inputmode="decimal" autocomplete="off" value="${dec(r1(it[k]))}"></div>`).join('')}
@@ -1316,7 +1333,8 @@ async function viewRegister() {
     if (!photos.length && !comment) { $('#comment').focus(); return toast('Toma una foto o escribe qué comiste (ej: "Huevo duro")', true); }
     const btn = $('#analyze'); busy(btn, true, 'Analizando…');
     try {
-      const data = await callAI({ images: photos.map((x) => x.base64), mimeType: 'image/jpeg', comment, meal: MEALS[$('#meal').value] });
+      const known = await knownP;
+      const data = await callAI({ images: photos.map((x) => x.base64), mimeType: 'image/jpeg', comment, meal: MEALS[$('#meal').value], known });
       items = (data.items || []).map((it) => ({ ...it }));
       meta = { description: data.description || '', confidence: data.confidence, notes: data.notes || '' };
       if (!items.length) { toast(data.notes || 'No se reconoció comida en la imagen', true); items = [{ name: '', kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }]; }

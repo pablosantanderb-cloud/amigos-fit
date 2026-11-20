@@ -40,6 +40,7 @@ const SCHEMA = {
           name: { type: "STRING", description: "Nombre CORTO del alimento, 1 a 3 palabras, sin cantidades ni detalles. Ej: 'Marraqueta', 'Palta', 'Huevo duro', 'Aceite de oliva'" },
           quantity: { type: "STRING", description: "ej. '1 taza (200 g)'" },
           grams: num, kcal: num, protein_g: num, carbs_g: num, fat_g: num,
+          from_history: { type: "BOOLEAN", description: "true si los valores salieron de un alimento que el usuario ya registró antes" },
         },
         required: ["name", "quantity", "grams", "kcal", "protein_g", "carbs_g", "fat_g"],
       },
@@ -143,7 +144,7 @@ async function handle(req: Request): Promise<Response> {
   if (!(await getUserId(req))) return json({ error: "Debes iniciar sesión" }, 401);
   if (!GEMINI_API_KEY) return json({ error: "Falta configurar el secreto GEMINI_API_KEY en Supabase" }, 500);
 
-  let body: { image?: string; images?: string[]; mimeType?: string; comment?: string; meal?: string; mode?: string; today?: string; viewing?: string };
+  let body: { image?: string; images?: string[]; mimeType?: string; comment?: string; meal?: string; mode?: string; today?: string; viewing?: string; known?: unknown[] };
   try { body = await req.json(); } catch { return json({ error: "JSON inválido" }, 400); }
 
   const { image, mimeType = "image/jpeg", comment = "", meal = "", mode = "food", today = "", viewing = "" } = body;
@@ -162,6 +163,15 @@ async function handle(req: Request): Promise<Response> {
     if (meal) parts.push({ text: `Comida del día: ${meal}.` });
     if (images.length > 1) parts.push({ text: `Se adjuntan ${images.length} fotos de la MISMA comida (distintos ángulos o distintas partes). Combínalas para estimar mejor las porciones y NO cuentes dos veces un alimento que aparece en más de una foto.` });
     if (comment.trim()) parts.push({ text: `Comentario del usuario: """${comment.slice(0, 1000)}"""` });
+    // Alimentos que este usuario ya registró (p. ej. leídos de una etiqueta): se reutilizan sus valores
+    const known = (Array.isArray(body.known) ? body.known : []).slice(0, 150).map((k) => {
+      const o = (k ?? {}) as Record<string, unknown>;
+      const n = (v: unknown) => Math.round((Number(v) || 0) * 10) / 10;
+      return `- ${String(o.name ?? "").slice(0, 60)} | ${String(o.quantity ?? "").slice(0, 60)}${o.grams ? ` | ${n(o.grams)} g` : ""} | ${n(o.kcal)} kcal | P ${n(o.protein_g)} | C ${n(o.carbs_g)} | G ${n(o.fat_g)}`;
+    }).filter((l) => l.length > 4);
+    if (known.length) parts.push({ text: `ALIMENTOS QUE ESTE USUARIO YA REGISTRÓ ANTES (valores confirmados por él, varios leídos de etiquetas nutricionales):
+${known.join("\n")}
+Si en esta comida aparece o se menciona el MISMO alimento (mismo producto o marca, ej. 'galletas Salmas'), usa ESOS valores escalados proporcionalmente a la cantidad de ahora (por unidades o por gramos) en vez de estimar, y marca from_history = true. Ej: si antes 3 unidades = 70 kcal y ahora comió 2, son 47 kcal. Usa el mismo nombre. Si es solo un alimento parecido pero distinto (otra marca o preparación), estímalo normal.` });
   }
   for (const img of images) parts.push({ inline_data: { mime_type: mimeType, data: img } });
 

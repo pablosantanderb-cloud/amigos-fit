@@ -73,7 +73,7 @@ export function createClient() {
     functions: { invoke: async (_n, { body }) => (body.mode === 'activity' ? { data: { notes: 'Leí 2 sesiones.', day_totals: [{ date: day(0), total_kcal: 2810, active_kcal: 760, resting_kcal: 2050 }], activities: [
       { date: day(-1), activity: 'Caminata', minutes: 42, kcal_active: 210, kcal_total: 260, steps: 5400, distance_km: 3.8 },
       { date: day(-3), activity: 'Fuerza', minutes: 50, kcal_active: 320, kcal_total: 0, steps: 0, distance_km: 0 }] }, error: null } : { data: { description: 'Porotos con riendas', confidence: 'media', notes: 'Asumí 1 plato hondo (~350 g).',
-      items: [{ name: 'Porotos con riendas', quantity: '1 plato (350 g)', grams: 350, kcal: 420, protein_g: 21, carbs_g: 68, fat_g: 7 },
+      items: [{ name: 'Porotos con riendas', quantity: '1 plato (350 g)', grams: 350, kcal: 420, protein_g: 21, carbs_g: 68, fat_g: 7, from_history: (window.__lastKnown = body.known || [], true) },
               { name: 'Ensalada chilena', quantity: '1/2 taza', grams: 100, kcal: 60, protein_g: 1, carbs_g: 5, fat_g: 4.5 }] }, error: null }) },
   };
 }
