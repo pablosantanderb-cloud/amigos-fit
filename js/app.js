@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import * as C from './calc.js?v=22';
+import * as C from './calc.js?v=23';
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, r = document) => r.querySelector(s);
@@ -103,7 +103,7 @@ async function renderSyncCard() {
             <li><code>active_kcal</code> (Número) = resultado del paso 3</li>
             <li><code>resting_kcal</code> (Número) = resultado del paso 5</li></ul></li>
           <li>Agrega <b>Mostrar resultado</b> (opcional) y toca ▶️ para probarlo. La primera vez acepta el permiso para leer Salud. Debe decir “✅ Amigos Fit: … guardado”.</li>
-          <li>Automatización 1 (datos en vivo): pestaña <b>Automatización</b> → <b>＋</b> → <b>App</b> → elige <b>Safari</b> (o la app Amigos Fit si aparece) → <b>Se abre</b> → <b>Ejecutar inmediatamente</b> → elige “Amigos Fit Salud”. Así, cada vez que abras la app, tu meta se ajusta con lo que llevas.</li>
+          <li>Datos en vivo: no necesitas automatización. Cada vez que abres Amigos Fit y tu último dato tiene más de 30 min, la app ejecuta el Atajo sola (salta a Atajos y vuelve) y tu meta se ajusta con lo que llevas.</li>
           <li>Automatización 2 (cierre del día): <b>＋</b> → <b>Hora del día</b>: <b>23:55</b>, <b>Diariamente</b> → <b>Ejecutar inmediatamente</b> → “Amigos Fit Salud”. Lo enviado desde las 23:30 se guarda como cierre del día.</li>
         </ol>
         <p class="muted">Si un día el teléfono estaba apagado a esa hora, ingresa ese cierre a mano en Hoy. Correrlo de nuevo el mismo día solo actualiza el dato.</p>
@@ -127,6 +127,15 @@ async function renderSyncCard() {
 }
 
 const SHORTCUT_NAME = 'Amigos Fit Salud';
+const lsNum = (k) => { try { return Number(localStorage.getItem(k)) || 0; } catch { return 0; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch { /* sin almacenamiento */ } };
+// Al volver desde Atajos, recarga Hoy un par de veces mientras llegan los datos del reloj
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !state.syncJumpAt || Date.now() - state.syncJumpAt > 5 * 60000) return;
+  state.syncJumpAt = 0;
+  const onHoy = () => { const h = location.hash.replace(/^#\/?/, ''); return h === '' || h.startsWith('hoy'); };
+  [1500, 5000].forEach((ms) => setTimeout(() => { if (onHoy()) route(); }, ms));
+});
 // Abre el Atajo y, al terminar, vuelve a Amigos Fit
 const shortcutUrl = () => `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}&x-success=${encodeURIComponent(BASE_URL + '#/hoy')}`;
 function agoTxt(iso) {
@@ -317,7 +326,7 @@ async function loadProfile() {
   if (age && age !== profile.age) upd.age = age;
   // Aprende el gasto promedio real de los cierres del reloj (últimos 28 días), una vez al día
   if (profile.learned_at !== C.isoDate()) {
-    const { data: wd } = await sb.from('daily_energy').select('total_kcal,active_kcal,resting_kcal')
+    const { data: wd } = await sb.from('daily_energy').select('total_kcal,active_kcal,resting_kcal,live_active_kcal,live_resting_kcal,live_at')
       .gte('log_date', C.addDays(C.isoDate(), -28)).lt('log_date', C.isoDate());
     const L = C.learnFromWatch({ ...profile, ...upd }, wd || []);
     upd.learned_at = C.isoDate();
@@ -325,6 +334,7 @@ async function loadProfile() {
       upd.learned_days = L.days;
       if (L.avg) upd.learned_tdee = L.avg;
     }
+    if (L.active && L.active !== profile.learned_active) upd.learned_active = L.active;
   }
   // Recalcula siempre con las fórmulas vigentes (si cambian, los perfiles existentes se actualizan solos)
   const tNow = C.targets({ ...profile, ...upd });
@@ -783,7 +793,8 @@ async function viewToday() {
     sb.from('daily_energy').select('*').eq('log_date', d).maybeSingle(),
   ]);
   const creatine = P_creatine() ? await sb.from('supplement_logs').select('id').eq('log_date', d).eq('item', 'creatina').maybeSingle() : { data: null };
-  const hasSync = !!(await sb.from('sync_tokens').select('user_id').maybeSingle()).data;
+  const syncRow = (await sb.from('sync_tokens').select('last_used_at').maybeSingle()).data;
+  const hasSync = !!syncRow;
   const creatineTaken = !!creatine.data;
   if (food.error) throw food.error;
   const logs = food.data || [];
@@ -833,10 +844,10 @@ async function viewToday() {
     </form>
     <p class="small muted" style="margin:10px 0 0">${plan.manual ? `🎯 Meta puesta a mano para ${isToday ? 'hoy' : 'este día'} (la automática sería ${fmt(plan.auto_target)}). Toca «Meta» para cambiarla.` : C.isFixedMode(P)
       ? `🎯 Meta fija = gasto promedio ${fmt(C.tdee(P))} (incluye tu ejercicio semanal promedio) − ${defTxt} objetivo. Los entrenos no la cambian.`
-      : plan.live && plan.live.kcal - plan.deficit >= plan.planned.kcal - plan.deficit
-      ? `🎯 Meta = gasto según tu reloj ${fmt(plan.live.kcal)} (reposo proyectado ${fmt(plan.live.restFull)} + ${P.exercise_credit_pct ?? C.DEFAULT_CREDIT}% de ${fmt(plan.live.active)} activas) − ${defTxt} objetivo.`
+      : plan.wd
+      ? `🎯 Meta = según tu reloj: reposo ${plan.wd.closed ? '' : 'proyectado '}${fmt(plan.wd.rest)} + ${P.exercise_credit_pct ?? C.DEFAULT_CREDIT}% de ${fmt(Math.max(plan.wd.active, plan.minActive))} activas − ${defTxt} objetivo.${plan.wd.active < plan.minActive ? ` Llevas ${fmt(plan.wd.active)} activas; se usa el mínimo de un día normal (${fmt(plan.minActive)}). Pasado eso, cada kcal activa sube tu meta.` : ' Cada kcal activa más sube tu meta.'}`
       : `🎯 Meta = gasto estimado ${fmt(plan.planned.kcal)} (base ${fmt(C.dayBase(P))}${actKcal ? ` + entreno ${fmt(actKcal)}` : ''}) − ${defTxt} objetivo.`}
-      ${plan.manual || C.isFixedMode(P) || actKcal || plan.live ? '' : 'Sin entreno registrado: si entrenas, tu meta sube.'}</p>
+      ${plan.manual || C.isFixedMode(P) || actKcal || plan.wd ? '' : 'Sin entreno registrado: si entrenas, tu meta sube.'}</p>
     ${hasSync && isToday ? `<div class="live row between">
       <span class="small">${plan.live ? `⌚ Reloj: ${fmt(plan.live.active)} kcal activas${watch?.exercise_min != null ? ` · ${fmt(watch.exercise_min)} min ejercicio` : ''} · actualizado ${agoTxt(plan.live.at)}` : '⌚ Aún sin datos del reloj hoy'}</span>
       <a class="btn ghost sm" href="${shortcutUrl()}">🔄 Actualizar</a></div>` : ''}
@@ -848,7 +859,7 @@ async function viewToday() {
       return `<div class="coach ${cz.tone}"><b>💡 Para lo que queda del día</b><ul>${cz.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
     })() : (() => {
       const rv = C.dayReview(P, plan, tot, balance, (acts.data || []).length > 0);
-      return `<div class="coach ${rv.tone}"><b>📋 Cómo te fue este día</b>${spent.source === 'reloj' ? '' : ' <span class="small muted">(estimado; ingresa el gasto del reloj para el dato real)</span>'}<ul>${rv.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+      return `<div class="coach ${rv.tone}"><b>📋 Cómo te fue este día</b>${spent.source !== 'estimado' ? '' : ' <span class="small muted">(estimado; ingresa el gasto del reloj para el dato real)</span>'}<ul>${rv.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
     })()}
   </div>
 
@@ -915,11 +926,11 @@ async function viewToday() {
   <div class="card">
     <h2>📊 Balance del día</h2>
     ${tot.kcal > 0 ? `<div class="balance ${balance < 0 ? 'ok' : 'over'}" style="margin-top:0">
-      <div class="row between"><span>${spent.source === 'reloj' ? '⌚ Con el gasto de tu reloj' : '📐 Estimado'}</span>
+      <div class="row between"><span>${spent.source === 'reloj' ? '⌚ Con el gasto de tu reloj' : spent.source === 'vivo' ? `⌚ Con tu reloj (${isToday ? 'en vivo' : 'último dato, sin cierre'})` : '📐 Estimado'}</span>
         <b>${balance < 0 ? `Déficit ${fmt(-balance)}` : `Superávit ${fmt(balance)}`} kcal</b></div>
       <table class="bal">
-        ${spent.source === 'reloj'
-          ? `<tr><td>Gasto según tu reloj${watch.active_kcal ? ` (reposo ${fmt(watch.resting_kcal || watch.total_kcal - watch.active_kcal)} + ${P.exercise_credit_pct ?? C.DEFAULT_CREDIT}% de activa ${fmt(watch.active_kcal)})` : ''}</td><td>${fmt(spent.kcal)}</td></tr>`
+        ${spent.source !== 'estimado'
+          ? `<tr><td>Gasto según tu reloj${spent.active != null ? ` (reposo${spent.source === 'vivo' ? ' proyectado' : ''} ${fmt(spent.rest)} + ${P.exercise_credit_pct ?? C.DEFAULT_CREDIT}% de activa ${fmt(spent.active)})` : ''}</td><td>${fmt(spent.kcal)}</td></tr>`
           : `<tr><td>Gasto sin ejercicio <span class="muted">${C.learnedWeight(P) > 0 ? '(aprendido de tu reloj)' : `(metabolismo ${fmt(C.bmr(P))} × actividad ${String(C.ACTIVITY_LEVELS[P.activity_level]?.factor ?? 1.2).replace('.', ',')})`}</span></td><td>${fmt(C.dayBase(P))}</td></tr>
              <tr><td>+ Entrenamientos</td><td>${actKcal ? `+${fmt(actKcal)}` : '0'}</td></tr>
              <tr class="sum"><td>= Gasto del día</td><td>${fmt(spent.kcal)}</td></tr>`}
@@ -998,11 +1009,14 @@ async function viewToday() {
 
   reveal('#wToggle', '#wf', () => $('#wf').weight_kg.focus());
 
-  // --- Datos en vivo: si el Atajo corre al abrir la app, los datos llegan unos segundos después → refresca 1 vez
+  // --- Datos en vivo: al abrir la app, si el último dato del reloj tiene más de 30 min, ejecuta el Atajo
+  // (salta a Atajos y vuelve). Solo si el Atajo ya funcionó alguna vez en los últimos 7 días.
   const liveAge = plan.live ? (Date.now() - new Date(plan.live.at).getTime()) / 60000 : Infinity;
-  if (hasSync && isToday && liveAge > 10 && Date.now() - (state.liveRefreshAt || 0) > 120000) {
-    state.liveRefreshAt = Date.now();
-    setTimeout(() => { if (location.hash.replace(/^#\/?/, '').startsWith('hoy') || location.hash === '') route(); }, 9000);
+  const shortcutWorks = syncRow?.last_used_at && Date.now() - new Date(syncRow.last_used_at).getTime() < 7 * 86400000;
+  if (hasSync && shortcutWorks && isToday && liveAge > 30 && Date.now() - lsNum('afSyncJump') > 15 * 60000 && document.visibilityState === 'visible') {
+    lsSet('afSyncJump', Date.now());
+    state.syncJumpAt = Date.now();
+    location.href = shortcutUrl();
   }
 
   // --- Creatina: check diario
@@ -1354,7 +1368,7 @@ async function viewProgress() {
     sb.from('food_logs').select('log_date,kcal,protein_g,carbs_g,fat_g').gte('log_date', qFrom).lte('log_date', to),
     sb.from('weight_logs').select('log_date,weight_kg,waist_cm').order('log_date'),
     sb.from('activity_logs').select('log_date,minutes,kcal_burned').gte('log_date', qFrom).lte('log_date', to),
-    sb.from('daily_energy').select('log_date,total_kcal,active_kcal,resting_kcal,kcal_target_manual,exercise_min').gte('log_date', qFrom).lte('log_date', to),
+    sb.from('daily_energy').select('log_date,total_kcal,active_kcal,resting_kcal,kcal_target_manual,exercise_min,live_active_kcal,live_resting_kcal,live_at').gte('log_date', qFrom).lte('log_date', to),
   ]);
   if (food.error) throw food.error;
   const P = profile;
@@ -1369,7 +1383,7 @@ async function viewProgress() {
   (food.data || []).forEach((l) => { const x = daily[l.log_date]; if (!x) return; x.kcal += +l.kcal; x.protein_g += +l.protein_g; x.carbs_g += +l.carbs_g; x.fat_g += +l.fat_g; x.n++; });
   (acts.data || []).forEach((a) => { if (daily[a.log_date]) { daily[a.log_date].act += a.minutes; daily[a.log_date].burn += C.activityKcal(P, a); } });
   const totalBurn = days.reduce((a, d) => a + daily[d].burn, 0);
-  allDays.forEach((d) => { const x = daily[d]; const e = C.dayExpenditure(P, x.burn, x.watch); x.spent = e.kcal; x.src = e.source; x.target = C.dayTarget(P, x.burn, x.watch?.kcal_target_manual); });
+  allDays.forEach((d) => { const x = daily[d]; const e = C.dayExpenditure(P, x.burn, x.watch); x.spent = e.kcal; x.src = e.source; x.target = C.dayTarget(P, x.burn, x.watch); });
   const inTarget = (d) => Math.abs(daily[d].kcal - daily[d].target) <= daily[d].target * 0.1;
   const balanceSum = days.filter((d) => daily[d].n > 0).reduce((a, d) => a + (daily[d].kcal - daily[d].spent), 0);
   const watchDays = days.filter((d) => daily[d].n > 0 && daily[d].src === 'reloj').length;

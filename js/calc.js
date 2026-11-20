@@ -179,9 +179,32 @@ export function tdee(p) {
 
 /** Aprende el gasto promedio real desde los cierres del reloj (ya ajustados por el % de confianza) */
 export function learnFromWatch(p, watchDays) {
-  const vals = watchDays.filter((w) => Number(w.total_kcal) > 0).map((w) => dayExpenditure(p, 0, w).kcal);
-  if (!vals.length) return { days: 0, avg: null };
-  return { days: vals.length, avg: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) };
+  const wds = watchDays.map((w) => watchDay(p, w)).filter(Boolean);
+  const vals = watchDays.filter((w) => watchDay(p, w)).map((w) => dayExpenditure(p, 0, w).kcal);
+  if (!vals.length) return { days: 0, avg: null, active: null };
+  const avg = (a) => Math.round(a.reduce((x, y) => x + y, 0) / a.length);
+  return { days: vals.length, avg: avg(vals), active: avg(wds.map((w) => w.active)) };
+}
+
+/** kcal activas de un día normal: aprendidas del reloj (3+ días); si no, 30% del metabolismo basal */
+export function expectedActive(p) {
+  const v = Number(p.learned_active);
+  return v > 0 && (Number(p.learned_days) || 0) >= 3 ? Math.round(v) : Math.round(bmr(p) * 0.3);
+}
+
+/**
+ * Datos del reloj de un día: el cierre (23:55) si existe; si no, el último dato en vivo
+ * con el reposo proyectado a 24 h. null si no hay datos del reloj.
+ */
+export function watchDay(p, watch) {
+  if (watch && Number(watch.total_kcal) > 0) {
+    const rest = Number(watch.resting_kcal) || 0;
+    const act = Number(watch.active_kcal) || 0;
+    if (rest && act) return { rest, active: act, closed: true };
+    return { rest: bmr(p), active: Math.max(0, Number(watch.total_kcal) - bmr(p)), closed: true };
+  }
+  const live = liveExpenditure(p, watch);
+  return live ? { rest: live.restFull, active: live.active, closed: false, at: live.at } : null;
 }
 
 const creditPct = (p) => (p.exercise_credit_pct ?? DEFAULT_CREDIT) / 100;
@@ -223,16 +246,21 @@ export function dayPlan(p, exerciseKcal, watch) {
   const spent = dayExpenditure(p, exerciseKcal, watch);
   const deficit = targetDeficit(p);
   const floor = Math.max(bmr(p), p.sex === 'M' ? 1500 : 1200);
-  let kcal = isFixedMode(p) ? (p.kcal_target || 0) : Math.round(planned.kcal - deficit);
-  // Datos "en vivo" del reloj durante el día: la meta puede SUBIR si ya te moviste más de lo planificado
   const live = liveExpenditure(p, watch);
-  if (live && !isFixedMode(p)) kcal = Math.max(kcal, Math.round(live.kcal - deficit));
+  // Con datos del reloj (modo dinámico): meta = reposo (proyectado a 24 h) + % de las activas − déficit.
+  // Las activas cuentan con un mínimo de "día normal" para que en la mañana la meta no parta muy baja.
+  const wd = isFixedMode(p) ? null : watchDay(p, watch);
+  const minActive = expectedActive(p);
+  let kcal;
+  if (isFixedMode(p)) kcal = p.kcal_target || 0;
+  else if (wd) kcal = Math.round(wd.rest + Math.max(wd.active, minActive) * creditPct(p) - deficit);
+  else kcal = Math.round(planned.kcal - deficit);
   if (deficit > 0) kcal = Math.max(Math.round(floor), kcal);
   const auto = kcal;
   const manual = Number(watch?.kcal_target_manual) || 0; // meta puesta a mano para este día
   if (manual > 0) kcal = Math.round(manual);
   const carbs_g = Number(p.carbs_manual) > 0 ? Math.round(Number(p.carbs_manual)) : Math.max(0, Math.round((kcal - p.protein_g * 4 - p.fat_g * 9) / 4));
-  return { kcal_target: kcal, auto_target: auto, manual: manual > 0, protein_g: p.protein_g, carbs_g, fat_g: p.fat_g, planned, spent, deficit, live, delta: kcal - (p.kcal_target || 0) };
+  return { kcal_target: kcal, auto_target: auto, manual: manual > 0, protein_g: p.protein_g, carbs_g, fat_g: p.fat_g, planned, spent, deficit, live, wd, minActive, delta: kcal - (p.kcal_target || 0) };
 }
 
 /**
@@ -252,8 +280,8 @@ export function liveExpenditure(p, watch) {
 }
 
 /** Meta de ingesta del día (ver dayPlan; no depende del cierre del reloj) */
-export function dayTarget(p, exerciseKcal = 0, manual = null) {
-  return Number(manual) > 0 ? Math.round(manual) : dayPlan(p, exerciseKcal, null).kcal_target;
+export function dayTarget(p, exerciseKcal = 0, watch = null) {
+  return dayPlan(p, exerciseKcal, watch).kcal_target;
 }
 
 /**
@@ -268,8 +296,11 @@ export function dayExpenditure(p, exerciseKcal, watch) {
     const rest = Number(watch.resting_kcal) || 0;
     const act = Number(watch.active_kcal) || 0;
     const kcal = rest && act ? rest + act * c : bmr(p) + Math.max(0, total - bmr(p)) * c;
-    return { kcal: Math.round(Math.min(total, kcal)), source: 'reloj' };
+    return { kcal: Math.round(Math.min(total, kcal)), source: 'reloj', rest: rest && act ? rest : null, active: rest && act ? act : null };
   }
+  // Sin cierre pero con datos en vivo (hoy, o un día en que no llegó el cierre): último dato, reposo proyectado a 24 h
+  const live = liveExpenditure(p, watch);
+  if (live) return { kcal: live.kcal, source: 'vivo', rest: live.restFull, active: live.active };
   return { kcal: dayBase(p) + Math.round(Number(exerciseKcal) || 0), source: 'estimado' };
 }
 
