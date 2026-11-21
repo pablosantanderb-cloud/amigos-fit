@@ -1658,11 +1658,11 @@ function renderMacroCompare(rows, error) {
       : m.mode === 'max'
       ? (diff <= 0 ? 'dentro' : `+${fmt(diff)} ${m.unit}/día de más`)
       : (Math.abs(diff) <= tgt * 0.1 ? 'en meta' : `${diff > 0 ? '+' : '−'}${fmt(Math.abs(diff))} kcal/día`);
-    return { pv, txt, st: status(m.mode, pv) };
+    return { pv, txt, st: status(m.mode, pv), avg, tgt, unit: m.unit, mode: m.mode };
   };
   const bar = (label, c) => `<div class="mc-row"><span class="mc-l">${label}</span>
     <div class="mc-bar"><i class="${c.st}" style="width:${Math.min(100, c.pv / 1.5)}%"></i><em></em></div>
-    <span class="mc-v ${c.st}">${c.pv}%</span><span class="mc-t">${c.txt}</span></div>`;
+    <span class="mc-v ${c.st}">${c.pv}%</span><span class="mc-t">Comió <b>${fmt(Math.round(c.avg))}</b> de su ${c.mode === 'min' ? 'mínimo' : c.mode === 'max' ? 'máximo' : 'meta'} de <b>${fmt(Math.round(c.tgt))} ${c.unit}</b> al día · ${c.txt}</span></div>`;
   const who = (r) => `${personDot(r.display_name)}${esc(r.display_name)}${r.user_id === session.user.id ? ' (tú)' : ''}`;
   const view = state.mcView || 'macro';
   const mk = state.mcMacro || 'kcal';
@@ -1685,7 +1685,7 @@ function renderMacroCompare(rows, error) {
   }
 
   box.innerHTML = `<h2>🥗 Macros vs el objetivo de cada uno</h2>
-    <p class="small muted">Promedio por día registrado (últimos ${state.groupRange} días). 100% = cumplió su propia meta; la línea marca el objetivo.</p>
+    <p class="small muted">Promedio por día registrado (últimos ${state.groupRange} días). 100% = cumplió su propia meta; la línea marca el objetivo. Bajo cada barra: lo que comió en promedio y su meta.</p>
     <div class="tabs" style="margin:8px 0"><button type="button" data-mcv="macro" class="${view === 'macro' ? 'active' : ''}">Por macro</button><button type="button" data-mcv="persona" class="${view === 'persona' ? 'active' : ''}">Por persona</button></div>
     ${body}
     <p class="small muted">🟢 en meta · 🟡 cerca · 🔴 lejos.</p>`;
