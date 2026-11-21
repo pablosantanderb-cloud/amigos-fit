@@ -1685,7 +1685,7 @@ function renderMacroCompare(rows, error) {
   }
 
   box.innerHTML = `<h2>🥗 Macros vs el objetivo de cada uno</h2>
-    <p class="small muted">Promedio por día registrado (últimos ${state.groupRange} días). 100% = cumplió su propia meta; la línea marca el objetivo. Bajo cada barra: lo que comió en promedio y su meta.</p>
+    <p class="small muted">Promedio por día registrado (últimos ${state.groupRange} días, <b>sin contar hoy</b> porque aún no termina). La meta de calorías es el promedio de la meta de cada día (con reloj y entrenos). 100% = cumplió su propia meta; la rayita marca el objetivo.</p>
     <div class="tabs" style="margin:8px 0"><button type="button" data-mcv="macro" class="${view === 'macro' ? 'active' : ''}">Por macro</button><button type="button" data-mcv="persona" class="${view === 'persona' ? 'active' : ''}">Por persona</button></div>
     ${body}
     <p class="small muted">🟢 en meta · 🟡 cerca · 🔴 lejos.</p>`;
