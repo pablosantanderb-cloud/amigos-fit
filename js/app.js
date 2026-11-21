@@ -1801,7 +1801,7 @@ async function viewFriends() {
   delete awards.undefined;
 
   const medal = (i) => ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
-  const mini = (label, v, max, txt, color = '#7c3aed') => // todas las barras del ranking del mismo color (distinto de las macros)
+  const mini = (label, v, max, txt, color = '#0891b2') => // todas las barras del ranking del mismo color (distinto de las macros)
  `<div class="mini"><span class="muted">${label}</span>
     <div class="bar"><i style="width:${Math.min(100, pct(v, max))}%;background:${color}"></i></div><span>${txt}</span></div>`;
 
