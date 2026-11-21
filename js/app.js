@@ -1814,11 +1814,11 @@ async function viewFriends() {
         <div class="row between"><div><b>${personDot(r.display_name)}${esc(r.display_name)}</b>${r.user_id === session.user.id ? ' <span class="small muted">(tú)</span>' : ''}
           <div class="small muted">Objetivo: ${GOAL_SHORT[r.goal] || '—'}${ch != null ? ` · ${ch > 0 ? '+' : ''}${String(ch).replace('.', ',')} kg desde el inicio` : ''}</div></div>
           <div class="score">${r.score}</div></div>
-        ${mini('Constancia', r.days_logged, r.days_in_range, `${r.days_logged}/${r.days_in_range} d`)}
+        ${mini('Constancia', r.days_logged, r.days_in_range, `${r.days_logged}/${r.days_in_range} d`, '#0891b2')}
         ${mini('Calorías ok', r.kcal_ok_days, r.days_in_range, `${r.kcal_ok_days} d`, COLORS.kcal)}
         ${mini('Proteína ok', r.protein_ok_days, r.days_in_range, `${r.protein_ok_days} d`, COLORS.prot)}
-        ${mini('Actividad', r.activity_min, actGoal, `${r.activity_min} min`, COLORS.carb)}
-        ${pp != null && C.weightDirection(r.goal) !== 'stable' ? mini('Avance peso', Math.max(0, pp), 10, `${ch > 0 ? '+' : ''}${String(r1(ch / r.start_weight * 100)).replace('.', ',')}%`, COLORS.fat) : ''}
+        ${mini('Actividad', r.activity_min, actGoal, `${r.activity_min} min`, '#7c3aed')}
+        ${pp != null && C.weightDirection(r.goal) !== 'stable' ? mini('Avance peso', Math.max(0, pp), 10, `${ch > 0 ? '+' : ''}${String(r1(ch / r.start_weight * 100)).replace('.', ',')}%`, '#92400e') : ''}
         ${awards[r.user_id] ? `<div class="chips">${awards[r.user_id].map((a) => `<span class="chip">${a}</span>`).join('')}</div>` : ''}
       </div></div>`;
   }).join('') + (rows.length === 1 ? '<p class="small muted">¡Invita a tus amigos para empezar a comparar!</p>' : '');
