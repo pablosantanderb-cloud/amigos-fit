@@ -1427,8 +1427,11 @@ async function viewProgress() {
   const totalBurn = days.reduce((a, d) => a + daily[d].burn, 0);
   allDays.forEach((d) => { const x = daily[d]; const e = C.dayExpenditure(P, x.burn, x.watch); x.spent = e.kcal; x.src = e.source; x.target = C.dayTarget(P, x.burn, x.watch); });
   const inTarget = (d) => Math.abs(daily[d].kcal - daily[d].target) <= daily[d].target * 0.1;
-  const balanceSum = days.filter((d) => daily[d].n > 0).reduce((a, d) => a + (daily[d].kcal - daily[d].spent), 0);
-  const watchDays = days.filter((d) => daily[d].n > 0 && daily[d].src === 'reloj').length;
+  // Días con registro ya terminados: hoy no cuenta en promedios, % ni balance (aún está incompleto)
+  const todayIso = C.isoDate();
+  const done = days.filter((d) => daily[d].n > 0 && d !== todayIso);
+  const balanceSum = done.reduce((a, d) => a + (daily[d].kcal - daily[d].spent), 0);
+  const watchDays = done.filter((d) => daily[d].src !== 'estimado').length;
   // Calibración con la balanza (últimos 28 días)
   const calDays = allDays.slice(-CAL_DAYS).filter((d) => daily[d].n > 0).map((d) => ({ intake: daily[d].kcal, expenditure: daily[d].spent }));
   const calW = (weights.data || []).filter((w) => w.log_date >= C.addDays(to, -(CAL_DAYS - 1))).map((w) => ({ date: w.log_date, kg: +w.weight_kg }));
@@ -1437,9 +1440,9 @@ async function viewProgress() {
   const goodDelta = (x) => (dir === 'down' ? x < 0 : dir === 'up' ? x > 0 : Math.abs(x) < 0.5);
 
   const logged = days.filter((d) => daily[d].n > 0);
-  const kcalOk = logged.filter(inTarget).length;
-  const protOk = logged.filter((d) => daily[d].protein_g >= P.protein_g * 0.9).length;
-  const avg = (k) => (logged.length ? logged.reduce((a, d) => a + daily[d][k], 0) / logged.length : 0);
+  const kcalOk = done.filter(inTarget).length;
+  const protOk = done.filter((d) => daily[d].protein_g >= P.protein_g * 0.9).length;
+  const avg = (k) => (done.length ? done.reduce((a, d) => a + daily[d][k], 0) / done.length : 0);
   // minutos de actividad del día: el mayor entre los entrenos registrados y los minutos de ejercicio de Salud
   allDays.forEach((d) => { const x = daily[d]; x.act = Math.max(x.act, Number(x.watch?.exercise_min) || 0); });
   const totalAct = days.reduce((a, d) => a + daily[d].act, 0);
@@ -1453,7 +1456,7 @@ async function viewProgress() {
   const weeks = {};
   days.forEach((d) => { const w = C.weekStart(d); (weeks[w] ||= []).push(d); });
   const wRows = Object.entries(weeks).reverse().map(([w, ds]) => {
-    const lg = ds.filter((d) => daily[d].n > 0);
+    const lg = ds.filter((d) => daily[d].n > 0 && d !== todayIso);
     const a = (k) => (lg.length ? lg.reduce((s, d) => s + daily[d][k], 0) / lg.length : null);
     const inWeek = ws.filter((x) => x.log_date >= w && x.log_date <= C.addDays(w, 6));
     const before = ws.filter((x) => x.log_date < w).pop();
@@ -1467,12 +1470,13 @@ async function viewProgress() {
   <h1>Mi progreso</h1>
   <div class="tabs">${[7, 30, 90].map((r) => `<button data-r="${r}" class="${state.range === r ? 'active' : ''}">${r} días</button>`).join('')}</div>
 
+  <p class="small muted" style="margin:4px 0 8px">Promedios, porcentajes y balance consideran los días con registro ya terminados (hoy no cuenta hasta mañana).</p>
   <div class="card"><div class="stat-grid">
     <div class="stat"><div class="v">${logged.length}/${days.length}</div><div class="l">Días con registro (constancia ${pct(logged.length, days.length)}%)</div></div>
-    <div class="stat"><div class="v">${pct(kcalOk, days.length)}%</div><div class="l">Días en meta calórica (±10%)</div></div>
-    <div class="stat"><div class="v">${pct(protOk, days.length)}%</div><div class="l">Días cumpliendo proteína</div></div>
-    <div class="stat"><div class="v">${fmt(avg('kcal'))}</div><div class="l">kcal promedio (meta base ${fmt(P.kcal_target)})</div></div>
-    <div class="stat"><div class="v" style="color:${balanceSum < 0 ? 'var(--accent)' : 'var(--danger)'}">${balanceSum < 0 ? '−' : '+'}${fmt(Math.abs(balanceSum))}</div><div class="l">Balance acumulado kcal (≈ ${balanceSum < 0 ? '−' : '+'}${dec(r1(Math.abs(balanceSum) / 7700))} kg) · ${watchDays} de ${logged.length} días con dato del reloj</div></div>
+    <div class="stat"><div class="v">${pct(kcalOk, done.length)}%</div><div class="l">Días en meta calórica (±10%) · ${kcalOk} de ${done.length} días</div></div>
+    <div class="stat"><div class="v">${pct(protOk, done.length)}%</div><div class="l">Días cumpliendo proteína (≥90%) · ${protOk} de ${done.length} días</div></div>
+    <div class="stat"><div class="v">${fmt(avg('kcal'))}</div><div class="l">kcal promedio · tu meta promedio fue ${fmt(avg('target'))}</div></div>
+    <div class="stat"><div class="v" style="color:${balanceSum < 0 ? 'var(--accent)' : 'var(--danger)'}">${balanceSum < 0 ? '−' : '+'}${fmt(Math.abs(balanceSum))}</div><div class="l">Balance acumulado kcal (≈ ${balanceSum < 0 ? '−' : '+'}${dec(r1(Math.abs(balanceSum) / 7700))} kg) · ${watchDays} de ${done.length} días con dato del reloj</div></div>
     <div class="stat"><div class="v">${totalAct} min</div><div class="l">Actividad (meta ${r0(P.weekly_activity_goal_min * days.length / 7)} min)${totalBurn ? ` · ${fmt(totalBurn)} kcal de ejercicio` : ''}</div></div>
     <div class="stat"><div class="v" style="color:${wDiff !== 0 && goodDelta(wDiff) ? 'var(--accent)' : 'inherit'}">${wDiff > 0 ? '+' : ''}${String(wDiff).replace('.', ',')} kg</div><div class="l">Desde el inicio (${String(wStart).replace('.', ',')} → ${String(wNow).replace('.', ',')} kg) · objetivo: ${goalTxt}</div></div>
   </div></div>
