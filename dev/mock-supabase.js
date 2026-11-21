@@ -11,7 +11,7 @@ let id = 1;
 for (let i = 0; i < 20; i++) {
   if (i % 4 === 3) continue;
   db.food_logs.push({ id: id++, user_id: uid, log_date: day(-i), meal: 'almuerzo', description: 'Arroz con pollo', kcal: 1200 + (i*37)%500, protein_g: 80 + i, carbs_g: 120, fat_g: 35, created_at: '' });
-  db.food_logs.push({ id: id++, user_id: uid, log_date: day(-i), meal: 'desayuno', description: 'Avena con plátano', comment: 'con leche descremada', items: [{name:'Avena',kcal:225,protein_g:8,carbs_g:40,fat_g:4},{name:'Plátano',kcal:105,protein_g:1,carbs_g:27,fat_g:0},{name:'Leche descremada',kcal:120,protein_g:11,carbs_g:3,fat_g:5}], kcal: 450, protein_g: 20, carbs_g: 70, fat_g: 9, created_at: '' });
+  db.food_logs.push({ id: id++, user_id: uid, log_date: day(-i), meal: 'desayuno', description: 'Avena con plátano', comment: 'con leche descremada', photo_path: i === 0 ? 'u1/a.jpg' : null, photo_paths: i === 0 ? ['u1/a.jpg', 'u1/b.jpg'] : [], items: [{name:'Avena',kcal:225,protein_g:8,carbs_g:40,fat_g:4},{name:'Plátano',kcal:105,protein_g:1,carbs_g:27,fat_g:0},{name:'Leche descremada',kcal:120,protein_g:11,carbs_g:3,fat_g:5}], kcal: 450, protein_g: 20, carbs_g: 70, fat_g: 9, created_at: '' });
   if (i % 3 === 0) db.weight_logs.push({ id: id++, user_id: uid, log_date: day(-i), weight_kg: 88 + i*0.1 });
   if (i % 2 === 0) db.activity_logs.push({ id: id++, user_id: uid, log_date: day(-i), activity: 'Caminar', minutes: 40, kcal_burned: 250 });
   if (i === 0) db.daily_energy.push({ id: id++, user_id: uid, log_date: day(0), live_active_kcal: 1100, live_resting_kcal: 1320, exercise_min: 64, live_at: new Date(Date.now()-25*60000).toISOString() });
@@ -69,7 +69,7 @@ export function createClient() {
       ], error: null };
       if (fn === 'create_group' || fn === 'join_group') return { data: db.groups[0], error: null };
     },
-    storage: { from: () => ({ createSignedUrls: async () => ({ data: [] }), upload: async () => ({ error: null }), remove: async () => ({}) }) },
+    storage: { from: () => ({ createSignedUrls: async (paths) => ({ data: paths.map((path, i) => ({ path, signedUrl: '/img/icon-192.png?p=' + i })) }), upload: async (path) => { (window.__up ||= []).push(path); return { error: null }; }, remove: async (ps) => { (window.__rm ||= []).push(...ps); return {}; } }) },
     functions: { invoke: async (_n, { body }) => (body.mode === 'activity' ? { data: { notes: 'Leí 2 sesiones.', day_totals: [{ date: day(0), total_kcal: 2810, active_kcal: 760, resting_kcal: 2050 }], activities: [
       { date: day(-1), activity: 'Caminata', minutes: 42, kcal_active: 210, kcal_total: 260, steps: 5400, distance_km: 3.8 },
       { date: day(-3), activity: 'Fuerza', minutes: 50, kcal_active: 320, kcal_total: 0, steps: 0, distance_km: 0 }] }, error: null } : { data: { description: 'Porotos con riendas', confidence: 'media', notes: 'Asumí 1 plato hondo (~350 g).',

@@ -188,8 +188,8 @@ const multiPhotoPicker = (id, title, sub) => `
   </div>
   <div class="thumbs hidden" id="${id}-thumbs"></div>
   <label class="btn ghost block" style="margin:8px 0 0" id="${id}-add">📷 Cargar foto<input id="${id}-gal" type="file" accept="image/*" multiple class="vh"></label>`;
-function bindMultiPhotoPicker(id, onChange, max, limit = MAX_FOOD_PHOTOS) {
-  let list = [];
+function bindMultiPhotoPicker(id, onChange, max, limit = MAX_FOOD_PHOTOS, initial = []) {
+  let list = [...initial]; // fotos ya guardadas: { path, dataUrl (URL firmada), saved: true }
   const render = () => {
     const thumbs = $(`#${id}-thumbs`);
     $(`#${id}-drop`).classList.toggle('hidden', list.length > 0);
@@ -213,7 +213,19 @@ function bindMultiPhotoPicker(id, onChange, max, limit = MAX_FOOD_PHOTOS) {
     render();
   };
   $(`#${id}-drop`).onclick = () => $(`#${id}-gal`).click();
+  if (list.length) render();
 }
+
+// Foto ya guardada → base64 (para que la IA la vuelva a mirar al editar)
+async function photoBase64(p) {
+  if (p.base64) return p.base64;
+  const blob = await (await fetch(p.dataUrl)).blob();
+  const dataUrl = await new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = ko; r.readAsDataURL(blob); });
+  p.base64 = String(dataUrl).split(',')[1];
+  return p.base64;
+}
+
+const logPhotoPaths = (l) => (Array.isArray(l?.photo_paths) && l.photo_paths.length ? l.photo_paths : l?.photo_path ? [l.photo_path] : []);
 
 function bindPhotoPicker(id, onPick, max) {
   const handler = async (ev) => {
@@ -1015,7 +1027,7 @@ async function viewToday() {
     const l = logs.find((x) => String(x.id) === b.dataset.del);
     const { error } = await sb.from('food_logs').delete().eq('id', l.id);
     if (error) return toast(error.message, true);
-    if (l.photo_path) await sb.storage.from('food-photos').remove([l.photo_path]);
+    if (logPhotoPaths(l).length) await sb.storage.from('food-photos').remove(logPhotoPaths(l));
     route();
   }));
   $$('[data-delact]').forEach((b) => (b.onclick = async () => {
@@ -1284,7 +1296,7 @@ async function viewRegister() {
 
   app.innerHTML = `
   <h1>${editing ? '✏️ Editar comida' : 'Registrar comida'}</h1>
-  ${editing ? '<p class="small muted">Corrige los alimentos abajo y guarda. Si quieres que la IA lo recalcule, escribe el detalle (y sube la foto otra vez si quieres que la mire) y toca Analizar.</p>' : ''}
+  ${editing ? '<p class="small muted">Corrige los alimentos abajo y guarda. Puedes quitar o agregar fotos. Si quieres que la IA lo recalcule con las fotos y el detalle, toca Analizar.</p>' : ''}
   <div class="card">
     <label style="margin-top:0">Comida</label>
     <div class="seg" id="mealSeg">${Object.entries(MEALS).map(([k, v]) => `<button type="button" data-meal="${k}" class="${k === meal0 ? 'active' : ''}">${v}</button>`).join('')}</div>
@@ -1304,7 +1316,12 @@ async function viewRegister() {
     $('#cancelEdit').onclick = () => { location.hash = '#/hoy'; };
   }
 
-  bindMultiPhotoPicker('food', (list) => { photos = list; }, 1024);
+  let savedPhotos = [];
+  if (editing && logPhotoPaths(editing).length) {
+    const { data } = await sb.storage.from('food-photos').createSignedUrls(logPhotoPaths(editing), 3600);
+    savedPhotos = (data || []).filter((x) => x.signedUrl).map((x) => ({ path: x.path, dataUrl: x.signedUrl, saved: true }));
+  }
+  bindMultiPhotoPicker('food', (list) => { photos = list; }, 1024, MAX_FOOD_PHOTOS, savedPhotos);
   $$('#mealSeg button').forEach((b) => (b.onclick = () => {
     $$('#mealSeg button').forEach((x) => x.classList.toggle('active', x === b));
     $('#meal').value = b.dataset.meal;
@@ -1358,7 +1375,8 @@ async function viewRegister() {
     const btn = $('#analyze'); busy(btn, true, 'Analizando…');
     try {
       const known = await knownP;
-      const data = await callAI({ images: photos.map((x) => x.base64), mimeType: 'image/jpeg', comment, meal: MEALS[$('#meal').value], known });
+      const images = await Promise.all(photos.map(photoBase64));
+      const data = await callAI({ images, mimeType: 'image/jpeg', comment, meal: MEALS[$('#meal').value], known });
       items = (data.items || []).map((it) => ({ ...it }));
       meta = { description: data.description || '', confidence: data.confidence, notes: data.notes || '' };
       if (!items.length) { toast(data.notes || 'No se reconoció comida en la imagen', true); items = [{ name: '', kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }]; }
@@ -1374,17 +1392,21 @@ async function viewRegister() {
       const valid = items.filter((it) => it.name || it.kcal);
       if (!valid.length) throw new Error('Agrega al menos un alimento');
       const tot = C.sumLogs(valid);
-      let photo_path = editing?.photo_path || null;
-      if (photos.length) { // se guarda la primera foto como miniatura del registro
-        photo_path = `${session.user.id}/${Date.now()}.jpg`;
-        const { error } = await sb.storage.from('food-photos').upload(photo_path, photos[0].blob, { contentType: 'image/jpeg' });
-        if (error) { console.warn('No se pudo subir la foto', error); photo_path = editing?.photo_path || null; }
+      // Todas las fotos: las ya guardadas se conservan, las nuevas se suben; la primera es la miniatura
+      const photo_paths = [];
+      for (const [i, p] of photos.entries()) {
+        if (p.saved) { photo_paths.push(p.path); continue; }
+        const path = `${session.user.id}/${Date.now()}_${i}.jpg`;
+        const { error } = await sb.storage.from('food-photos').upload(path, p.blob, { contentType: 'image/jpeg' });
+        if (error) console.warn('No se pudo subir la foto', error); else photo_paths.push(path);
       }
+      const photo_path = photo_paths[0] || null;
+      const removed = logPhotoPaths(editing).filter((x) => !photo_paths.includes(x)); // fotos quitadas al editar
       const date = $('#date').value || state.date;
       const row = {
         log_date: date, meal: $('#meal').value,
         description: ($('#desc').value || valid.map((x) => x.name).join(', ')).slice(0, 200),
-        comment: $('#comment').value.trim() || null, photo_path,
+        comment: $('#comment').value.trim() || null, photo_path, photo_paths,
         kcal: r0(tot.kcal), protein_g: r1(tot.protein_g), carbs_g: r1(tot.carbs_g), fat_g: r1(tot.fat_g),
         items: valid, ai_confidence: meta.confidence,
       };
@@ -1392,7 +1414,7 @@ async function viewRegister() {
         ? await sb.from('food_logs').update(row).eq('id', editing.id)
         : await sb.from('food_logs').insert(row);
       if (error) throw error;
-      if (editing?.photo_path && photo_path !== editing.photo_path) await sb.storage.from('food-photos').remove([editing.photo_path]);
+      if (removed.length) await sb.storage.from('food-photos').remove(removed);
       state.date = date;
       toast(editing ? 'Cambios guardados ✅' : 'Comida registrada ✅');
       location.hash = '#/hoy';
