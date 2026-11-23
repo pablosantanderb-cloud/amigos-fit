@@ -118,6 +118,23 @@ Reglas:
 - Si pregunta algo fuera de nutrición, ejercicio, salud o la app, redirígelo amablemente.
 - Formato: texto simple. Puedes usar **negrita** y viñetas con "- ". Sin tablas ni títulos con #.`;
 
+// Se usa SIEMPRE el mismo modelo (precisión pareja): gemini-3.5-flash-lite. No se baja a modelos más antiguos
+// o más débiles, y los flash más potentes tardan 1-2 min (nov-2026). Si Google lo satura (503), se reintenta el
+// mismo modelo con pausas crecientes. Solo si Google lo retira se usa el "lite" más nuevo disponible.
+const BEST = "gemini-3.5-flash-lite";
+async function modelOrder(): Promise<string[]> {
+  if (Deno.env.get("GEMINI_MODEL")) return [GEMINI_MODEL];
+  const available = await flashModels();
+  if (!available.length || available.includes(BEST)) return [BEST];
+  return available.filter((m) => m.includes("lite")).slice(0, 1).concat(available.filter((m) => !m.includes("lite")).slice(0, 1));
+}
+// Intentos: el modelo, y si está saturado, de nuevo tras 1,5 s, 3 s y 5 s (dentro del plazo)
+const attemptsFor = (order: string[]) => order.length === 1
+  ? [order[0], "__pausa__1500", order[0], "__pausa__3000", order[0], "__pausa__5000", order[0]]
+  : order;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const BUSY = "La IA de Google está saturada en este momento (pasa a ratos y dura poco). Espera unos segundos y vuelve a tocar Analizar, o ingresa los valores a mano.";
+
 // Lista de modelos "flash" disponibles para esta clave, ordenados del más nuevo al más antiguo (cache 6 h).
 let modelCache: { at: number; list: string[] } | null = null;
 async function flashModels(): Promise<string[]> {
@@ -196,18 +213,13 @@ Si en esta comida aparece o se menciona el MISMO alimento (mismo producto o marc
   // Modelos medidos con una foto real (nov-2026): 3.5-flash-lite y 3.1-flash-lite responden en ~3-4 s con buena
   // calidad; gemini-3.8-flash tardó >60 s. Primero los rápidos conocidos y, si Google los retira, los "lite"/"flash"
   // disponibles que liste la API.
-  const preferred = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
-  const available = await flashModels();
-  const models = [...new Set([
-    ...(Deno.env.get("GEMINI_MODEL") ? [GEMINI_MODEL] : []),
-    ...preferred.filter((m) => !available.length || available.includes(m)),
-    ...available,
-  ])].slice(0, 4);
+  const models = attemptsFor(await modelOrder());
   const baseConfig = { temperature: 0.2, responseMimeType: "application/json", responseSchema: isActivity ? ACTIVITY_SCHEMA : SCHEMA };
   const deadline = Date.now() + 55_000; // responder antes de que el servidor corte la conexión
   let resp: Response | null = null;
   let lastErr = { status: 0, message: "" };
   outer: for (const model of models) {
+    if (model.startsWith("__pausa__")) { const ms = Number(model.slice(9)); if (deadline - Date.now() > ms + 12_000) { await sleep(ms); continue; } break; }
     // Los modelos 3.x "piensan" antes de responder; pedimos razonamiento bajo para que sea rápido.
     const configs = /^gemini-[3-9]/.test(model) && !model.includes("lite") ? [{ ...baseConfig, thinkingConfig: { thinkingLevel: "low" } }, baseConfig] : [baseConfig];
     for (const generationConfig of configs) {
@@ -242,7 +254,9 @@ Si en esta comida aparece o se menciona el MISMO alimento (mismo producto o marc
   }
 
   if (!resp || !resp.ok) {
-    const msg = lastErr.status === 429
+    const msg = lastErr.status === 503 || lastErr.status === 500 || lastErr.status === 504
+      ? BUSY
+      : lastErr.status === 429
       ? "Se alcanzó el límite gratuito de análisis por minuto/día. Intenta en un rato o ingresa los valores a mano."
       : lastErr.status === 400 && /API key/i.test(lastErr.message)
       ? "La clave de Gemini no es válida. Revisa el secreto GEMINI_API_KEY."
@@ -315,12 +329,11 @@ function scaleFromHistory(it: Record<string, unknown>, known: Record<string, unk
 
 // Llama a Gemini probando modelos rápidos en orden; devuelve el texto de la respuesta
 async function gemini(payload: Record<string, unknown>, temperature: number): Promise<{ text?: string; status?: number; message?: string }> {
-  const preferred = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
-  const available = await flashModels();
-  const models = [...new Set([...preferred.filter((m) => !available.length || available.includes(m)), ...available])].slice(0, 4);
+  const models = attemptsFor(await modelOrder());
   const deadline = Date.now() + 50_000;
   let last = { status: 0, message: "" };
   for (const model of models) {
+    if (model.startsWith("__pausa__")) { const ms = Number(model.slice(9)); if (deadline - Date.now() > ms + 12_000) { await sleep(ms); continue; } break; }
     const left = deadline - Date.now();
     if (left < 5_000) break;
     let resp: Response;
@@ -363,7 +376,9 @@ async function chat(body: { messages?: unknown[]; context?: string }): Promise<R
     contents: msgs,
   }, 0.6);
   if (r.text) return json({ reply: r.text });
-  const msg = r.status === 429 ? "Se alcanzó el límite gratuito de la IA por ahora. Intenta en un rato." : `El coach no pudo responder (${r.status}): ${r.message}`;
+  const msg = r.status === 429 ? "Se alcanzó el límite gratuito de la IA por ahora. Intenta en un rato."
+    : [500, 503, 504].includes(r.status ?? 0) ? "La IA de Google está saturada en este momento. Espera unos segundos y vuelve a preguntar."
+    : `El coach no pudo responder (${r.status}): ${r.message}`;
   return json({ error: msg }, 502);
 }
 
