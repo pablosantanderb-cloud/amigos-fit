@@ -407,3 +407,6 @@ table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
 .coach-foot textarea { min-height: 44px; max-height: 120px; margin: 0; }
 .coach-foot .dict-btn { bottom: 3px; right: 4px; }
 .coach-foot .btn { margin: 0; height: 44px; }
+
+.h-ver { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.app-ver { font-size: .8rem; font-weight: 600; color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: 2px 10px; white-space: nowrap; }

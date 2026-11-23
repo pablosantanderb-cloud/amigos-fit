@@ -41,6 +41,7 @@ const SCHEMA = {
           quantity: { type: "STRING", description: "ej. '1 taza (200 g)'" },
           grams: num, kcal: num, protein_g: num, carbs_g: num, fat_g: num,
           from_history: { type: "BOOLEAN", description: "true si los valores salieron de un alimento que el usuario ya registró antes" },
+          history_name: { type: "STRING", description: "si from_history: el nombre EXACTO del alimento de la lista de ya registrados" },
         },
         required: ["name", "quantity", "grams", "kcal", "protein_g", "carbs_g", "fat_g"],
       },
@@ -169,6 +170,7 @@ async function handle(req: Request): Promise<Response> {
   if (images.reduce((a, x) => a + x.length, 0) > 10_000_000) return json({ error: "Imágenes demasiado grandes" }, 413);
 
   const parts: unknown[] = [];
+  let knownRows: Record<string, unknown>[] = [];
   if (isActivity) {
     parts.push({ text: ACTIVITY_PROMPT });
     if (/^\d{4}-\d{2}-\d{2}$/.test(today)) parts.push({ text: `Fecha de hoy: ${today}.` });
@@ -179,14 +181,15 @@ async function handle(req: Request): Promise<Response> {
     if (images.length > 1) parts.push({ text: `Se adjuntan ${images.length} fotos de la MISMA comida (distintos ángulos o distintas partes). Combínalas para estimar mejor las porciones y NO cuentes dos veces un alimento que aparece en más de una foto.` });
     if (comment.trim()) parts.push({ text: `Comentario del usuario: """${comment.slice(0, 1000)}"""` });
     // Alimentos que este usuario ya registró (p. ej. leídos de una etiqueta): se reutilizan sus valores
-    const known = (Array.isArray(body.known) ? body.known : []).slice(0, 150).map((k) => {
+    knownRows = (Array.isArray(body.known) ? body.known : []).slice(0, 150).map((k) => (k ?? {}) as Record<string, unknown>);
+    const known = knownRows.map((k) => {
       const o = (k ?? {}) as Record<string, unknown>;
       const n = (v: unknown) => Math.round((Number(v) || 0) * 10) / 10;
       return `- ${String(o.name ?? "").slice(0, 60)} | ${String(o.quantity ?? "").slice(0, 60)}${o.grams ? ` | ${n(o.grams)} g` : ""} | ${n(o.kcal)} kcal | P ${n(o.protein_g)} | C ${n(o.carbs_g)} | G ${n(o.fat_g)}`;
     }).filter((l) => l.length > 4);
     if (known.length) parts.push({ text: `ALIMENTOS QUE ESTE USUARIO YA REGISTRÓ ANTES (valores confirmados por él, varios leídos de etiquetas nutricionales):
 ${known.join("\n")}
-Si en esta comida aparece o se menciona el MISMO alimento (mismo producto o marca, ej. 'galletas Salmas'), usa ESOS valores escalados proporcionalmente a la cantidad de ahora (por unidades o por gramos) en vez de estimar, y marca from_history = true. Ej: si antes 3 unidades = 70 kcal y ahora comió 2, son 47 kcal. Usa el mismo nombre. Si es solo un alimento parecido pero distinto (otra marca o preparación), estímalo normal.` });
+Si en esta comida aparece o se menciona el MISMO alimento (mismo producto o marca, ej. 'galletas Salmas'), usa ESOS valores escalados proporcionalmente a la cantidad de ahora (por unidades o por gramos) en vez de estimar, y marca from_history = true y pon en history_name el nombre exacto de la lista. En quantity y grams pon SIEMPRE la cantidad de AHORA (ej. 'medio huevo' → quantity '0.5 unidad', grams = la mitad de los gramos de 1 unidad). Ej: si antes 3 unidades = 70 kcal y ahora comió 2, son 47 kcal. Usa el mismo nombre. Si es solo un alimento parecido pero distinto (otra marca o preparación), estímalo normal.` });
   }
   for (const img of images) parts.push({ inline_data: { mime_type: mimeType, data: img } });
 
@@ -260,8 +263,11 @@ Si en esta comida aparece o se menciona el MISMO alimento (mismo producto o marc
       }
       return json(result);
     }
-    // Recalcula totales desde los items para que siempre cuadren
     const items = Array.isArray(result.items) ? result.items : [];
+    // Alimentos del historial: el escalado se hace aquí con aritmética (la IA a veces copia los valores sin escalar,
+    // ej. 'medio huevo' con las kcal de uno entero)
+    for (const it of items) if (it?.from_history) scaleFromHistory(it, knownRows);
+    // Recalcula totales desde los items para que siempre cuadren
     const sum = (k: string) => Math.round(items.reduce((a: number, it: Record<string, number>) => a + (Number(it[k]) || 0), 0) * 10) / 10;
     if (items.length) result.total = { kcal: Math.round(sum("kcal")), protein_g: sum("protein_g"), carbs_g: sum("carbs_g"), fat_g: sum("fat_g") };
     return json(result);
@@ -269,6 +275,42 @@ Si en esta comida aparece o se menciona el MISMO alimento (mismo producto o marc
     console.error("Respuesta no-JSON de Gemini", text);
     return json({ error: "La IA devolvió una respuesta inválida, intenta de nuevo." }, 502);
   }
+}
+
+const normName = (s: unknown) => String(s ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+// Cantidad y unidad al inicio del texto: "2 unidades", "0.5 unidad", "1,5 huevos", "1/2 taza", "medio huevo"
+function leadingQty(q: unknown): { n: number; unit: string } | null {
+  const raw = String(q ?? "").trim().replace(/(\d),(\d)/g, "$1.$2");
+  const s = normName(raw);
+  let n: number | null = null, rest = "";
+  const frac = raw.match(/^(\d+)\s*\/\s*(\d+)\s*(.*)$/);
+  const num = raw.match(/^(\d+(?:\.\d+)?)\s*(.*)$/);
+  const word = s.match(/^(medio|media|mitad de|mitad|un|una|uno)\s+(.*)$/);
+  if (frac) { n = Number(frac[1]) / Number(frac[2]); rest = frac[3]; }
+  else if (num) { n = Number(num[1]); rest = num[2]; }
+  else if (word) { n = /^(medio|media|mitad)/.test(word[1]) ? 0.5 : 1; rest = word[2]; }
+  if (n == null || !(n > 0)) return null;
+  // primera palabra de la unidad, en singular (unidades→unidad, huevos→huevo, galletas→galleta)
+  const unit = normName(rest).replace(/^(de|del)\s+/, "").split(" ")[0]?.replace(/(es|s)$/, "") ?? "";
+  return { n, unit: unit === "unidad" || unit === "u" || unit === "un" ? "unidad" : unit };
+}
+function scaleFromHistory(it: Record<string, unknown>, known: Record<string, unknown>[]) {
+  const target = normName(it.history_name || it.name);
+  if (!target) return;
+  const k = known.find((x) => normName(x.name) === target) ?? known.find((x) => normName(x.name) === normName(it.name));
+  if (!k || !(Number(k.kcal) > 0)) return;
+  let f: number | null = null;
+  const gNow = Number(it.grams), gK = Number(k.grams);
+  const qNow = leadingQty(it.quantity), qK = leadingQty(k.quantity);
+  // Misma unidad (unidades, galletas, tazas…) → por cantidad; si no, por gramos
+  if (qNow && qK && qNow.unit === qK.unit) f = qNow.n / qK.n;
+  else if (gNow > 0 && gK > 0) f = gNow / gK;
+  if (!f || !isFinite(f) || f <= 0 || f > 20) return;
+  const r1 = (v: unknown) => Math.round((Number(v) || 0) * f! * 10) / 10;
+  it.kcal = Math.round((Number(k.kcal) || 0) * f);
+  it.protein_g = r1(k.protein_g); it.carbs_g = r1(k.carbs_g); it.fat_g = r1(k.fat_g);
+  if (gK > 0) it.grams = Math.round(gK * f);
+  delete it.history_name;
 }
 
 // Llama a Gemini probando modelos rápidos en orden; devuelve el texto de la respuesta

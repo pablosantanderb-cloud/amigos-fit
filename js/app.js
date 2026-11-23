@@ -142,7 +142,7 @@ async function renderSyncCard() {
 }
 
 const SHORTCUT_NAME = 'Amigos Fit Salud';
-const APP_V = 63;
+const APP_V = 64;
 // Saltos automáticos al Atajo: se pueden apagar (Perfil) y quedan registrados para diagnosticar
 const autoSyncOn = () => lsStr('afAutoSync') !== '0';
 function logJump(why) {
@@ -742,7 +742,7 @@ async function viewProfile() {
   const first = !profileComplete();
   const opt = (obj, val) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === val ? 'selected' : ''}>${esc(v.label ?? v)}</option>`).join('');
   app.innerHTML = `
-  <h1>${first ? (p.kcal_target ? 'Actualiza tu perfil' : '¡Bienvenido/a! 👋') : 'Mi perfil'}</h1>
+  <h1 class="h-ver">${first ? (p.kcal_target ? 'Actualiza tu perfil' : '¡Bienvenido/a! 👋') : 'Mi perfil'}<span class="app-ver">Versión ${APP_V}</span></h1>
   ${first ? `<p class="muted">${p.kcal_target ? 'Mejoramos cómo se calcula tu meta. Indica tu <b>actividad diaria (sin entrenos)</b> y tus <b>entrenamientos habituales</b>, y guarda.' : 'Completa tus datos para calcular tu plan personalizado.'}</p>` : ''}
   <form id="f" class="card">
     <label>Nombre</label><input name="display_name" required maxlength="40" value="${esc(p.display_name)}">
