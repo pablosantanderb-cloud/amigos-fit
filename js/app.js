@@ -90,6 +90,8 @@ async function renderSyncCard() {
     ${row ? `
       <div class="sync-row"><span class="small muted">Dirección</span><code>${esc(SYNC_URL)}</code>${copyBtn('Copiar dirección', SYNC_URL)}</div>
       <div class="sync-row"><span class="small muted">Tu código personal (no lo compartas)</span><code>${esc(row.token.slice(0, 6))}••••••••${esc(row.token.slice(-4))}</code>${copyBtn('Copiar código', row.token)}</div>
+      <label class="check"><input type="checkbox" id="autoSync" ${autoSyncOn() ? 'checked' : ''}> Actualizar con el reloj al abrir la app (si el último dato tiene más de 2 h). Apágalo si prefieres que abra más rápido; igual tienes el botón 🔄 en Hoy.</label>
+      <p class="small muted">Versión de la app: ${APP_V} · Saltos automáticos recientes: ${(() => { try { const l = JSON.parse(localStorage.getItem('afJumpLog') || '[]'); return l.length ? l.map((x) => `${new Date(x.t).toLocaleString('es-CL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: C.TZ })} (${esc(x.why)})`).join(', ') : 'ninguno'; } catch { return '—'; } })()}</p>
       <p class="small">${row.last_used_at ? `✅ Última sincronización: ${new Date(row.last_used_at).toLocaleString('es-CL', { dateStyle: 'medium', timeStyle: 'short', timeZone: C.TZ })}` : '⏳ Aún no se ha recibido ninguna sincronización.'}</p>
       <details class="small"><summary><b>Cómo crear el Atajo (5 min, una sola vez)</b></summary>
         <ol class="steps">
@@ -121,6 +123,8 @@ async function renderSyncCard() {
       </details>
       <button type="button" class="btn ghost sm" id="syncRegen" style="margin-top:10px">🔄 Generar un código nuevo</button>`
     : `<button type="button" class="btn block" id="syncGen">🔑 Generar mi código personal</button>`}`;
+  const as = $('#autoSync');
+  if (as) as.onchange = () => { lsSet('afAutoSync', as.checked ? '1' : '0'); toast(as.checked ? 'Se actualizará con el reloj al abrir' : 'Ya no salta al Atajo al abrir'); };
   $$('#syncCard [data-copy]').forEach((b) => (b.onclick = async () => {
     try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copiado 📋'); } catch { toast('No se pudo copiar', true); }
   }));
@@ -138,6 +142,16 @@ async function renderSyncCard() {
 }
 
 const SHORTCUT_NAME = 'Amigos Fit Salud';
+const APP_V = 61;
+// Saltos automáticos al Atajo: se pueden apagar (Perfil) y quedan registrados para diagnosticar
+const autoSyncOn = () => lsStr('afAutoSync') !== '0';
+function logJump(why) {
+  try {
+    const l = JSON.parse(localStorage.getItem('afJumpLog') || '[]');
+    l.unshift({ t: Date.now(), why });
+    localStorage.setItem('afJumpLog', JSON.stringify(l.slice(0, 6)));
+  } catch {}
+}
 const lsStr = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 const lsNum = (k) => { try { return Number(localStorage.getItem(k)) || 0; } catch { return 0; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch { /* sin almacenamiento */ } };
@@ -1049,11 +1063,13 @@ async function viewToday() {
   // ejecuta "Amigos Fit Ayer", que cierra ayer y luego corre "Amigos Fit Salud" para hoy. Una vez por día.
   if (yesterdayOpen && isToday && lsStr('afYestJump') !== d && document.visibilityState === 'visible') {
     lsSet('afYestJump', d);
+    logJump('cierre de ayer');
     lsSet('afSyncJump', Date.now());
     state.syncJumpAt = Date.now();
     location.href = shortcutUrl(SHORTCUT_YESTERDAY);
-  } else if (hasSync && shortcutWorks && isToday && liveAge > 120 && Date.now() - lsNum('afSyncJump') > 60 * 60000 && document.visibilityState === 'visible') {
+  } else if (autoSyncOn() && hasSync && shortcutWorks && isToday && liveAge > 120 && Date.now() - lsNum('afSyncJump') > 60 * 60000 && document.visibilityState === 'visible') {
     lsSet('afSyncJump', Date.now());
+    logJump(liveAge === Infinity ? 'sin dato de hoy' : `dato de hace ${Math.round(liveAge / 60)} h`);
     state.syncJumpAt = Date.now();
     location.href = shortcutUrl();
   }
