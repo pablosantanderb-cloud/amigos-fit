@@ -811,18 +811,20 @@ function macroBar(label, value, target, color) {
 async function viewToday() {
   const d = state.date;
   const uid = session.user.id;
-  const [food, weight, acts, energy] = await Promise.all([
+  // Todas las consultas en paralelo (antes iban en fila y retrasaban la apertura)
+  const isTodayD = d === C.isoDate();
+  const [food, weight, acts, energy, creatine, syncQ, yestQ] = await Promise.all([
     sb.from('food_logs').select('*').eq('log_date', d).order('created_at'),
     sb.from('weight_logs').select('*').eq('log_date', d).maybeSingle(),
     sb.from('activity_logs').select('*').eq('log_date', d).order('created_at'),
     sb.from('daily_energy').select('*').eq('log_date', d).maybeSingle(),
+    P_creatine() ? sb.from('supplement_logs').select('id').eq('log_date', d).eq('item', 'creatina').maybeSingle() : Promise.resolve({ data: null }),
+    sb.from('sync_tokens').select('last_used_at,yesterday_at').maybeSingle(),
+    isTodayD ? sb.from('daily_energy').select('total_kcal').eq('log_date', C.addDays(d, -1)).maybeSingle() : Promise.resolve({ data: null }),
   ]);
-  const creatine = P_creatine() ? await sb.from('supplement_logs').select('id').eq('log_date', d).eq('item', 'creatina').maybeSingle() : { data: null };
-  const syncRow = (await sb.from('sync_tokens').select('last_used_at,yesterday_at').maybeSingle()).data;
+  const syncRow = syncQ.data;
   // ¿Quedó ayer sin cierre del reloj? (solo importa si el usuario tiene el Atajo "Amigos Fit Ayer")
-  const yesterdayOpen = syncRow?.yesterday_at && d === C.isoDate()
-    ? !(Number((await sb.from('daily_energy').select('total_kcal').eq('log_date', C.addDays(d, -1)).maybeSingle()).data?.total_kcal) > 0)
-    : false;
+  const yesterdayOpen = !!syncRow?.yesterday_at && isTodayD && !(Number(yestQ.data?.total_kcal) > 0);
   const hasSync = !!syncRow;
   const creatineTaken = !!creatine.data;
   if (food.error) throw food.error;
@@ -1038,7 +1040,8 @@ async function viewToday() {
 
   reveal('#wToggle', '#wf', () => $('#wf').weight_kg.focus());
 
-  // --- Datos en vivo: al abrir la app, si el último dato del reloj tiene más de 30 min, ejecuta el Atajo
+  // --- Datos en vivo: al abrir la app, si el último dato del reloj tiene más de 2 h, ejecuta el Atajo
+  // (antes 30 min: saltaba casi cada vez que abrías la app; para actualizar antes está el botón 🔄)
   // (salta a Atajos y vuelve). Solo si el Atajo ya funcionó alguna vez en los últimos 7 días.
   const liveAge = plan.live ? (Date.now() - new Date(plan.live.at).getTime()) / 60000 : Infinity;
   const shortcutWorks = syncRow?.last_used_at && Date.now() - new Date(syncRow.last_used_at).getTime() < 7 * 86400000;
@@ -1049,7 +1052,7 @@ async function viewToday() {
     lsSet('afSyncJump', Date.now());
     state.syncJumpAt = Date.now();
     location.href = shortcutUrl(SHORTCUT_YESTERDAY);
-  } else if (hasSync && shortcutWorks && isToday && liveAge > 30 && Date.now() - lsNum('afSyncJump') > 15 * 60000 && document.visibilityState === 'visible') {
+  } else if (hasSync && shortcutWorks && isToday && liveAge > 120 && Date.now() - lsNum('afSyncJump') > 60 * 60000 && document.visibilityState === 'visible') {
     lsSet('afSyncJump', Date.now());
     state.syncJumpAt = Date.now();
     location.href = shortcutUrl();
