@@ -142,7 +142,7 @@ async function renderSyncCard() {
 }
 
 const SHORTCUT_NAME = 'Amigos Fit Salud';
-const APP_V = 61;
+const APP_V = 62;
 // Saltos automáticos al Atajo: se pueden apagar (Perfil) y quedan registrados para diagnosticar
 const autoSyncOn = () => lsStr('afAutoSync') !== '0';
 function logJump(why) {
@@ -1284,6 +1284,45 @@ async function knownFoods() {
   } catch { return []; }
 }
 
+// Dictado por voz en un campo de texto (Web Speech API de Safari/Chrome). Si no está disponible,
+// se usa el micrófono del teclado del iPhone (enfoca el campo y explica cómo).
+function bindDictation(fieldId, btnId, hintId) {
+  const field = $(`#${fieldId}`), btn = $(`#${btnId}`), hint = $(`#${hintId}`);
+  if (!field || !btn) return;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const showHint = (txt) => { hint.textContent = txt; hint.classList.toggle('hidden', !txt); };
+  const fallback = () => {
+    field.focus();
+    showHint('Toca el 🎤 del teclado del iPhone (abajo a la derecha) para dictar.');
+  };
+  if (!SR) { btn.onclick = fallback; return; }
+  let rec = null, base = '';
+  const stop = () => { try { rec?.stop(); } catch {} };
+  btn.onclick = () => {
+    if (rec) return stop();
+    rec = new SR();
+    rec.lang = 'es-CL';
+    rec.continuous = true;
+    rec.interimResults = true;
+    base = field.value.trim() ? field.value.trim() + ' ' : '';
+    rec.onresult = (e) => {
+      let txt = '';
+      for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
+      field.value = (base + txt.trim()).slice(0, Number(field.maxLength) > 0 ? field.maxLength : 500);
+    };
+    rec.onerror = (e) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') fallback();
+      else if (e.error !== 'aborted' && e.error !== 'no-speech') toast('No se pudo dictar: ' + e.error, true);
+    };
+    rec.onend = () => { rec = null; btn.classList.remove('rec'); btn.textContent = '🎤'; if (hint.textContent.startsWith('Escuchando')) showHint(''); };
+    try {
+      rec.start();
+      btn.classList.add('rec'); btn.textContent = '⏹';
+      showHint('Escuchando… habla y toca ⏹ al terminar.');
+    } catch { rec = null; fallback(); }
+  };
+}
+
 // ---------------------------------------------------------------- REGISTRAR COMIDA
 async function resizeImage(file, max = 1024, quality = 0.82) {
   const url = URL.createObjectURL(file);
@@ -1324,7 +1363,11 @@ async function viewRegister() {
     <label>Fotos (recomendado · hasta 6)</label>
     ${multiPhotoPicker('food', 'Fotos del plato (hasta 6)', 'varios ángulos o cada parte de la comida mejoran la estimación')}
     <label>¿Qué comiste? <span class="muted">(obligatorio si no hay foto)</span></label>
-    <textarea id="comment" maxlength="500" placeholder="Ej: 2 huevos duros y una marraqueta con palta. Con foto puedes agregar detalles: 'le eché 1 cucharada de aceite', 'me comí la mitad'."></textarea>
+    <div class="dict-wrap">
+      <textarea id="comment" maxlength="500" placeholder="Ej: 2 huevos duros y una marraqueta con palta. Con foto puedes agregar detalles: 'le eché 1 cucharada de aceite', 'me comí la mitad'. También puedes dictarlo con 🎤."></textarea>
+      <button type="button" id="dictate" class="dict-btn" aria-label="Dictar por voz">🎤</button>
+    </div>
+    <p id="dictHint" class="small muted hidden"></p>
     <button id="analyze" class="btn block" style="margin-top:12px">✨ Analizar con IA</button>
     <button id="manual" class="btn ghost block" style="margin-top:8px">✍️ Ingresar valores a mano</button>
   </div>
@@ -1341,6 +1384,7 @@ async function viewRegister() {
     savedPhotos = (data || []).filter((x) => x.signedUrl).map((x) => ({ path: x.path, dataUrl: x.signedUrl, saved: true }));
   }
   bindMultiPhotoPicker('food', (list) => { photos = list; }, 1024, MAX_FOOD_PHOTOS, savedPhotos);
+  bindDictation('comment', 'dictate', 'dictHint');
   $$('#mealSeg button').forEach((b) => (b.onclick = () => {
     $$('#mealSeg button').forEach((x) => x.classList.toggle('active', x === b));
     $('#meal').value = b.dataset.meal;
