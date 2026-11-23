@@ -103,6 +103,20 @@ const ACTIVITY_SCHEMA = {
   required: ["activities", "day_totals"],
 };
 
+// Coach personal (chat): experto en nutrición y ejercicio con los datos del usuario
+const COACH_PROMPT = `Eres el coach personal de nutrición y ejercicio de la app "Amigos Fit" (un grupo de amigos en Chile que registra comidas, entrenamientos y peso).
+Combinas el conocimiento de un nutricionista deportivo y un entrenador, basado en la mejor evidencia científica actual (ISSN, ACSM, OMS, metaanálisis recientes).
+Reglas:
+- Responde SIEMPRE en español de Chile, cercano y motivador pero directo, tuteando. Respuestas breves y prácticas (máximo ~150 palabras salvo que pida detalle), con viñetas cortas cuando ayuden.
+- Usa los DATOS DEL USUARIO de abajo: su objetivo, metas diarias, lo que lleva hoy, su historial, peso y actividad. Cita números concretos (kcal, gramos) cuando sirva. No inventes datos que no estén.
+- Para "qué como": propone opciones concretas y comunes en Chile (marraqueta, palta, quesillo, pollo, legumbres, yogur protein, etc.) con porciones y sus kcal/proteína aproximadas, ajustadas a lo que le queda del día.
+- Para ejercicio: rutinas concretas (series, repeticiones, minutos, intensidad) acordes a su nivel y objetivo.
+- Hoy aún no termina: lo de hoy está incompleto. Los promedios valen sobre días ya cerrados.
+- La meta diaria de la app ya descuenta el déficit/superávit del objetivo; "Te quedan" = meta − consumido.
+- No diagnostiques enfermedades ni recetes medicamentos; ante síntomas, lesiones o dudas médicas recomienda consultar a un profesional. No promuevas dietas extremas (menos de 1.200–1.500 kcal) ni ayunos peligrosos.
+- Si pregunta algo fuera de nutrición, ejercicio, salud o la app, redirígelo amablemente.
+- Formato: texto simple. Puedes usar **negrita** y viñetas con "- ". Sin tablas ni títulos con #.`;
+
 // Lista de modelos "flash" disponibles para esta clave, ordenados del más nuevo al más antiguo (cache 6 h).
 let modelCache: { at: number; list: string[] } | null = null;
 async function flashModels(): Promise<string[]> {
@@ -144,8 +158,9 @@ async function handle(req: Request): Promise<Response> {
   if (!(await getUserId(req))) return json({ error: "Debes iniciar sesión" }, 401);
   if (!GEMINI_API_KEY) return json({ error: "Falta configurar el secreto GEMINI_API_KEY en Supabase" }, 500);
 
-  let body: { image?: string; images?: string[]; mimeType?: string; comment?: string; meal?: string; mode?: string; today?: string; viewing?: string; known?: unknown[] };
+  let body: { image?: string; images?: string[]; mimeType?: string; comment?: string; meal?: string; mode?: string; today?: string; viewing?: string; known?: unknown[]; messages?: unknown[]; context?: string };
   try { body = await req.json(); } catch { return json({ error: "JSON inválido" }, 400); }
+  if (body.mode === "chat") return chat(body);
 
   const { image, mimeType = "image/jpeg", comment = "", meal = "", mode = "food", today = "", viewing = "" } = body;
   const images = (Array.isArray(body.images) ? body.images : image ? [image] : []).filter((x) => typeof x === "string" && x).slice(0, 6);
@@ -254,6 +269,60 @@ Si en esta comida aparece o se menciona el MISMO alimento (mismo producto o marc
     console.error("Respuesta no-JSON de Gemini", text);
     return json({ error: "La IA devolvió una respuesta inválida, intenta de nuevo." }, 502);
   }
+}
+
+// Llama a Gemini probando modelos rápidos en orden; devuelve el texto de la respuesta
+async function gemini(payload: Record<string, unknown>, temperature: number): Promise<{ text?: string; status?: number; message?: string }> {
+  const preferred = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+  const available = await flashModels();
+  const models = [...new Set([...preferred.filter((m) => !available.length || available.includes(m)), ...available])].slice(0, 4);
+  const deadline = Date.now() + 50_000;
+  let last = { status: 0, message: "" };
+  for (const model of models) {
+    const left = deadline - Date.now();
+    if (left < 5_000) break;
+    let resp: Response;
+    try {
+      resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
+        body: JSON.stringify({ ...payload, generationConfig: { temperature, maxOutputTokens: 1200 } }),
+        signal: AbortSignal.timeout(Math.min(25_000, left)),
+      });
+    } catch (e) { last = { status: 504, message: (e as Error).name }; continue; }
+    if (resp.ok) {
+      const data = await resp.json();
+      const text = data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("").trim() ?? "";
+      if (text) return { text };
+      last = { status: 502, message: "respuesta vacía" };
+      continue;
+    }
+    const detail = await resp.text();
+    let message = detail.slice(0, 300);
+    try { message = JSON.parse(detail)?.error?.message ?? message; } catch { /* texto */ }
+    last = { status: resp.status, message };
+    console.error("Gemini chat error", model, resp.status, message);
+    if (![404, 429, 500, 503].includes(resp.status)) break;
+  }
+  return last;
+}
+
+async function chat(body: { messages?: unknown[]; context?: string }): Promise<Response> {
+  const msgs = (Array.isArray(body.messages) ? body.messages : [])
+    .map((m) => (m ?? {}) as Record<string, unknown>)
+    .filter((m) => typeof m.text === "string" && m.text.trim())
+    .slice(-20)
+    .map((m) => ({ role: m.role === "model" ? "model" : "user", parts: [{ text: String(m.text).slice(0, 2000) }] }));
+  if (!msgs.length || msgs[msgs.length - 1].role !== "user") return json({ error: "Escribe una pregunta" }, 400);
+  while (msgs.length && msgs[0].role !== "user") msgs.shift();
+  const context = String(body.context ?? "").slice(0, 40_000);
+  const r = await gemini({
+    systemInstruction: { parts: [{ text: `${COACH_PROMPT}\n\n===== DATOS DEL USUARIO =====\n${context}` }] },
+    contents: msgs,
+  }, 0.6);
+  if (r.text) return json({ reply: r.text });
+  const msg = r.status === 429 ? "Se alcanzó el límite gratuito de la IA por ahora. Intenta en un rato." : `El coach no pudo responder (${r.status}): ${r.message}`;
+  return json({ error: msg }, 502);
 }
 
 // Cualquier error inesperado vuelve como JSON con CORS (si no, Safari solo dice "Failed to send a request").

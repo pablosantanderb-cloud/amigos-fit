@@ -70,7 +70,7 @@ export function createClient() {
       if (fn === 'create_group' || fn === 'join_group') return { data: db.groups[0], error: null };
     },
     storage: { from: () => ({ createSignedUrls: async (paths) => ({ data: paths.map((path, i) => ({ path, signedUrl: '/img/icon-192.png?p=' + i })) }), upload: async (path) => { (window.__up ||= []).push(path); return { error: null }; }, remove: async (ps) => { (window.__rm ||= []).push(...ps); return {}; } }) },
-    functions: { invoke: async (_n, { body }) => (body.mode === 'activity' ? { data: { notes: 'Leí 2 sesiones.', day_totals: [{ date: day(0), total_kcal: 2810, active_kcal: 760, resting_kcal: 2050 }], activities: [
+    functions: { invoke: async (_n, { body }) => body.mode === 'chat' ? (window.__coach = body, await new Promise((r) => setTimeout(r, 400)), { data: { reply: 'Te quedan **850 kcal** y 60 g de proteína. Opciones:\n- Pechuga de pollo 150 g + arroz 1/2 taza (~420 kcal, 45 g P)\n- Yogur protein + plátano (~250 kcal, 20 g P)' }, error: null }) : (body.mode === 'activity' ? { data: { notes: 'Leí 2 sesiones.', day_totals: [{ date: day(0), total_kcal: 2810, active_kcal: 760, resting_kcal: 2050 }], activities: [
       { date: day(-1), activity: 'Caminata', minutes: 42, kcal_active: 210, kcal_total: 260, steps: 5400, distance_km: 3.8 },
       { date: day(-3), activity: 'Fuerza', minutes: 50, kcal_active: 320, kcal_total: 0, steps: 0, distance_km: 0 }] }, error: null } : { data: { description: 'Porotos con riendas', confidence: 'media', notes: 'Asumí 1 plato hondo (~350 g).',
       items: [{ name: 'Porotos con riendas', quantity: '1 plato (350 g)', grams: 350, kcal: 420, protein_g: 21, carbs_g: 68, fat_g: 7, from_history: (window.__lastKnown = body.known || [], true) },

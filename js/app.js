@@ -142,7 +142,7 @@ async function renderSyncCard() {
 }
 
 const SHORTCUT_NAME = 'Amigos Fit Salud';
-const APP_V = 62;
+const APP_V = 63;
 // Saltos automáticos al Atajo: se pueden apagar (Perfil) y quedan registrados para diagnosticar
 const autoSyncOn = () => lsStr('afAutoSync') !== '0';
 function logJump(why) {
@@ -419,6 +419,149 @@ async function route() {
   app.innerHTML = '<div class="loading">Cargando…</div>';
   try { await v(); window.scrollTo(0, 0); }
   catch (e) { console.error(e); app.innerHTML = `<div class="card err">Ocurrió un error: ${esc(e.message)}</div>`; }
+}
+
+// ---------------------------------------------------------------- COACH (chat con IA)
+const COACH_KEY = () => `afCoach_${session?.user?.id || ''}`;
+const coachLoad = () => { try { return JSON.parse(localStorage.getItem(COACH_KEY()) || '[]'); } catch { return []; } };
+const coachSave = (m) => { try { localStorage.setItem(COACH_KEY(), JSON.stringify(m.slice(-40))); } catch {} };
+const COACH_SUGGEST = ['¿Qué como en lo que queda del día?', '¿Cómo voy con mi objetivo?', 'Dame una rutina de 30 min para hoy', '¿Qué snack alto en proteína me recomiendas?'];
+
+// Texto del modelo → HTML seguro (negritas, viñetas y saltos de línea)
+function coachHtml(t) {
+  const lines = esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').split('\n');
+  let out = '', inList = false;
+  for (const raw of lines) {
+    const m = raw.match(/^\s*(?:[-•*]|\d+[.)])\s+(.*)/);
+    if (m) { if (!inList) { out += '<ul>'; inList = true; } out += `<li>${m[1]}</li>`; continue; }
+    if (inList) { out += '</ul>'; inList = false; }
+    out += raw.trim() ? `<p>${raw}</p>` : '';
+  }
+  return out + (inList ? '</ul>' : '');
+}
+
+// Resumen de los datos del usuario para el coach: perfil, metas, hoy e historial (28 días; peso 120 días)
+async function coachContext() {
+  const P = profile, today = C.isoDate(), from = C.addDays(today, -27);
+  const [food, acts, energy, weights, supp] = await Promise.all([
+    sb.from('food_logs').select('log_date,meal,description,kcal,protein_g,carbs_g,fat_g,items,created_at').eq('user_id', session.user.id).gte('log_date', from).order('created_at'),
+    sb.from('activity_logs').select('log_date,activity,minutes,kcal_burned,steps,distance_km').eq('user_id', session.user.id).gte('log_date', from),
+    sb.from('daily_energy').select('*').eq('user_id', session.user.id).gte('log_date', from),
+    sb.from('weight_logs').select('log_date,weight_kg,waist_cm,body_fat_pct').eq('user_id', session.user.id).gte('log_date', C.addDays(today, -120)).order('log_date'),
+    P.track_creatine ? sb.from('supplement_logs').select('log_date').eq('user_id', session.user.id).eq('item', 'creatina').gte('log_date', C.addDays(today, -13)) : Promise.resolve({ data: [] }),
+  ]);
+  const r = (x) => Math.round(Number(x) || 0);
+  const daily = {};
+  for (let d = from; d <= today; d = C.addDays(d, 1)) daily[d] = { kcal: 0, p: 0, c: 0, f: 0, n: 0, burn: 0, acts: [], meals: [], watch: null };
+  (food.data || []).forEach((l) => { const x = daily[l.log_date]; if (!x) return; x.kcal += +l.kcal; x.p += +l.protein_g; x.c += +l.carbs_g; x.f += +l.fat_g; x.n++; x.meals.push(l); });
+  (acts.data || []).forEach((a) => { const x = daily[a.log_date]; if (!x) return; x.burn += C.activityKcal(P, a); x.acts.push(a); });
+  (energy.data || []).forEach((e) => { if (daily[e.log_date]) daily[e.log_date].watch = e; });
+  const t = C.targets(P);
+  const L = [];
+  L.push(`Nombre: ${P.display_name || ''} · Sexo: ${P.sex === 'M' ? 'hombre' : 'mujer'} · Edad: ${P.age || C.ageFromBirth(P.birth_date) || '?'} · Estatura: ${P.height_cm} cm`);
+  L.push(`Peso actual (perfil): ${P.weight_kg} kg · Peso inicial: ${P.start_weight_kg || '?'} kg · Peso objetivo: ${P.target_weight_kg || 'no definido'} kg`);
+  L.push(`Objetivo: ${C.GOALS[P.goal] || P.goal}${C.usesRate(P.goal) ? ` a ${P.rate_kg_week} kg/semana` : ''}`);
+  L.push(`Actividad diaria fuera del entreno: ${C.ACTIVITY_LEVELS[P.activity_level]?.label || P.activity_level}`);
+  L.push(`Entrenamiento habitual: moderado ${P.train_mod_sessions || 0} sesiones × ${P.train_mod_minutes || 0} min/semana; intenso ${P.train_int_sessions || 0} × ${P.train_int_minutes || 0} min/semana. Meta semanal de actividad: ${P.weekly_activity_goal_min || '?'} min.`);
+  L.push(`Metabolismo basal ${r(C.bmr(P))} kcal · Gasto total estimado ${r(P.tdee)} kcal${Number(P.learned_tdee) > 0 ? ` · Gasto real aprendido del reloj ${r(P.learned_tdee)} kcal (${P.learned_days} días)` : ''}`);
+  L.push(`Modo de meta: ${P.target_mode === 'fixed' ? 'fija' : 'se ajusta con cada entreno / con el gasto del reloj'}. Meta base ${r(P.kcal_target)} kcal/día.`);
+  L.push(`Metas diarias de macros: proteína ${r(P.protein_g)} g (mínimo)${P.protein_manual ? ' [puesta a mano]' : ''}, carbohidratos ${r(t.carbs_g ?? P.carbs_g)} g, grasas ${r(P.fat_g)} g.`);
+  if (P.track_creatine) L.push(`Toma creatina. Días tomada (últimos 14): ${(supp.data || []).length}.`);
+  // Hoy
+  const td = daily[today];
+  const plan = C.dayPlan(P, td.burn, td.watch);
+  L.push('');
+  L.push(`HOY ${today}, hora actual ${new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', timeZone: C.TZ })}:`);
+  L.push(`Meta de hoy ${r(plan.kcal_target)} kcal · Consumido ${r(td.kcal)} kcal · Le quedan ${r(plan.kcal_target - td.kcal)} kcal · Proteína ${r(td.p)}/${r(P.protein_g)} g · Carbos ${r(td.c)}/${r(plan.carbs_g)} g · Grasas ${r(td.f)}/${r(P.fat_g)} g`);
+  if (plan.live) L.push(`Reloj hoy: ${r(plan.live.active)} kcal activas${td.watch?.exercise_min != null ? `, ${td.watch.exercise_min} min de ejercicio` : ''}.`);
+  td.meals.forEach((m) => {
+    const items = (Array.isArray(m.items) ? m.items : []).map((it) => `${it.name}${it.quantity ? ` (${it.quantity})` : ''} ${r(it.kcal)} kcal P${r(it.protein_g)}`).join('; ');
+    L.push(`- ${MEALS[m.meal] || m.meal}: ${items || m.description || ''} → ${r(m.kcal)} kcal, P ${r(m.protein_g)} C ${r(m.carbs_g)} G ${r(m.fat_g)}`);
+  });
+  if (!td.meals.length) L.push('- Aún no registra comidas hoy.');
+  td.acts.forEach((a) => L.push(`- Entreno: ${a.activity} ${a.minutes} min, ${r(C.activityKcal(P, a))} kcal`));
+  // Historial
+  L.push('');
+  L.push('HISTORIAL (días anteriores, más reciente primero). Formato: fecha | comido kcal / meta kcal | P C G (g) | gasto real | entrenos | comidas:');
+  const days = Object.keys(daily).filter((d) => d < today).reverse();
+  let withData = 0;
+  for (const d of days) {
+    const x = daily[d];
+    if (!x.n && !x.acts.length) continue;
+    withData++;
+    const e = C.dayExpenditure(P, x.burn, x.watch);
+    const tg = C.dayTarget(P, x.burn, x.watch);
+    const meals = x.meals.map((m) => (Array.isArray(m.items) && m.items.length ? m.items.map((it) => it.name).join(', ') : m.description || '')).join(' / ').slice(0, 240);
+    L.push(`${d} | ${x.n ? `${r(x.kcal)} / ${r(tg)}` : 'sin comidas registradas'} | P${r(x.p)} C${r(x.c)} G${r(x.f)} | gasto ${r(e.kcal)} (${e.source}) | ${x.acts.map((a) => `${a.activity} ${a.minutes}min`).join(', ') || '—'} | ${meals}`);
+  }
+  if (!withData) L.push('(sin registros anteriores)');
+  // Peso
+  const ws = weights.data || [];
+  L.push('');
+  L.push(ws.length ? `PESAJES (últimos 120 días): ${ws.map((w) => `${w.log_date} ${w.weight_kg} kg${w.waist_cm ? ` cintura ${w.waist_cm}` : ''}${w.body_fat_pct ? ` grasa ${w.body_fat_pct}%` : ''}`).join('; ')}` : 'PESAJES: ninguno registrado en 120 días.');
+  return L.join('\n');
+}
+
+function openCoach() {
+  if (document.querySelector('.coach-ov')) return;
+  let msgs = coachLoad();
+  let ctxP = coachContext().catch((e) => { console.warn('contexto coach', e); return ''; });
+  let busy = false;
+  const el = document.createElement('div');
+  el.className = 'coach-ov';
+  el.innerHTML = `<div class="coach-panel" role="dialog" aria-modal="true">
+    <div class="coach-head">
+      <div><b>💬 Tu coach</b><small>Nutrición y ejercicio · conoce tu perfil e historial</small></div>
+      <button type="button" class="icon-btn" id="coachNew" title="Nueva conversación">🗑</button>
+      <button type="button" class="icon-btn" id="coachX" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="coach-msgs" id="coachMsgs"></div>
+    <div class="coach-foot">
+      <div class="dict-wrap">
+        <textarea id="coachIn" rows="1" maxlength="1500" placeholder="Pregúntale lo que quieras…"></textarea>
+        <button type="button" id="coachMic" class="dict-btn" aria-label="Dictar por voz">🎤</button>
+      </div>
+      <button type="button" id="coachSend" class="btn">Enviar</button>
+    </div>
+    <p id="coachHint" class="small muted hidden" style="margin:0 12px 8px"></p>
+  </div>`;
+  document.body.appendChild(el);
+  document.body.style.overflow = 'hidden';
+  const box = $('#coachMsgs'), input = $('#coachIn');
+  const render = (thinking = false) => {
+    box.innerHTML = (msgs.length ? '' : `<div class="coach-msg model"><p>¡Hola${profile?.display_name ? ' ' + esc(profile.display_name) : ''}! 👋 Soy tu coach. Conozco tu objetivo, tus metas, lo que llevas hoy y tu historial. ¿En qué te ayudo?</p></div>
+      <div class="coach-sug">${COACH_SUGGEST.map((s) => `<button type="button">${esc(s)}</button>`).join('')}</div>`)
+      + msgs.map((m) => `<div class="coach-msg ${m.role}">${m.role === 'model' ? coachHtml(m.text) : `<p>${esc(m.text).replace(/\n/g, '<br>')}</p>`}</div>`).join('')
+      + (thinking ? '<div class="coach-msg model typing"><span></span><span></span><span></span></div>' : '');
+    box.querySelectorAll('.coach-sug button').forEach((b) => (b.onclick = () => send(b.textContent)));
+    box.scrollTop = box.scrollHeight;
+  };
+  const close = () => { el.remove(); document.body.style.overflow = ''; };
+  const send = async (text) => {
+    text = String(text ?? input.value).trim();
+    if (!text || busy) return;
+    busy = true; input.value = ''; input.style.height = '';
+    msgs.push({ role: 'user', text, t: Date.now() });
+    coachSave(msgs); render(true);
+    try {
+      const context = await ctxP;
+      const data = await callAI({ mode: 'chat', context, messages: msgs.slice(-20).map(({ role, text }) => ({ role, text })) });
+      msgs.push({ role: 'model', text: data.reply, t: Date.now() });
+      coachSave(msgs);
+    } catch (e) {
+      msgs.pop(); input.value = text;
+      toast(e.message, true);
+    }
+    busy = false; render();
+  };
+  $('#coachX').onclick = close;
+  el.onclick = (e) => { if (e.target === el) close(); };
+  $('#coachNew').onclick = () => { if (!msgs.length || confirm('¿Borrar esta conversación y empezar una nueva?')) { msgs = []; coachSave(msgs); ctxP = coachContext().catch(() => ''); render(); } };
+  $('#coachSend').onclick = () => send();
+  input.oninput = () => { input.style.height = ''; input.style.height = Math.min(input.scrollHeight, 120) + 'px'; };
+  input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !('ontouchstart' in window)) { e.preventDefault(); send(); } };
+  bindDictation('coachIn', 'coachMic', 'coachHint');
+  render();
 }
 
 // ---------------------------------------------------------------- TUTORIAL
@@ -871,6 +1014,7 @@ async function viewToday() {
     <div class="label">${prettyDate(d)}</div>
     <button class="icon-btn" id="next" ${d >= C.isoDate() ? 'disabled style="opacity:.3"' : ''}>›</button>
   </div>
+  <button type="button" id="coachBtn" class="coach-open">💬 <span><b>Pregúntale a tu coach</b><small>Nutrición y ejercicio con tus datos</small></span><i>›</i></button>
 
   <div class="card">
     ${gauge(tot.kcal, target)}
@@ -1053,6 +1197,7 @@ async function viewToday() {
   }));
 
   reveal('#wToggle', '#wf', () => $('#wf').weight_kg.focus());
+  $('#coachBtn').onclick = () => openCoach();
 
   // --- Datos en vivo: al abrir la app, si el último dato del reloj tiene más de 2 h, ejecuta el Atajo
   // (antes 30 min: saltaba casi cada vez que abrías la app; para actualizar antes está el botón 🔄)
