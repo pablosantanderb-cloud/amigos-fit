@@ -142,7 +142,7 @@ async function renderSyncCard() {
 }
 
 const SHORTCUT_NAME = 'Amigos Fit Salud';
-const APP_V = 64;
+const APP_V = 65;
 // Saltos automáticos al Atajo: se pueden apagar (Perfil) y quedan registrados para diagnosticar
 const autoSyncOn = () => lsStr('afAutoSync') !== '0';
 function logJump(why) {
@@ -1415,6 +1415,7 @@ function foodItemsTable(l) {
 }
 
 // Alimentos distintos que el usuario ya registró (el más reciente de cada nombre), para que la IA los reutilice
+const normFood = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 async function knownFoods() {
   try {
     const { data } = await sb.from('food_logs').select('items,created_at').eq('user_id', session.user.id)
@@ -1496,6 +1497,7 @@ async function viewRegister() {
   const meal0 = editing ? mealKey(editing.meal) : defaultMeal();
   // Alimentos ya registrados (últimos 120 días): la IA reutiliza sus valores si se repiten
   const knownP = knownFoods();
+  const excludeKnown = new Set(); // alimentos del historial que el usuario marcó como "no es el mismo"
 
   app.innerHTML = `
   <h1>${editing ? '✏️ Editar comida' : 'Registrar comida'}</h1>
@@ -1546,7 +1548,7 @@ async function viewRegister() {
       <div style="margin-top:8px">
         ${items.map((it, i) => `<div class="item" data-i="${i}">
           <div class="row"><input data-k="name" value="${esc(it.name)}" placeholder="Alimento"><button class="icon-btn" data-rm="${i}" title="Quitar">✕</button></div>
-          ${it.quantity || it.from_history ? `<div class="small muted">${esc(it.quantity || '')}${it.from_history ? ' <span class="hist">♻️ de tu registro</span>' : ''}</div>` : ''}
+          ${it.quantity || it.from_history ? `<div class="small muted">${esc(it.quantity || '')}${it.from_history ? ` <span class="hist">♻️ de tu registro</span> <button type="button" class="hist-x" data-nh="${i}">✕ no es el mismo</button>` : ''}</div>` : ''}
           <div class="item-nums">
             ${[['kcal', 'kcal'], ['protein_g', 'Prot g'], ['carbs_g', 'Carb g'], ['fat_g', 'Grasa g']].map(([k, l]) => `<div><span class="small muted">${l}</span>
               <input data-k="${k}" type="text" inputmode="decimal" autocomplete="off" value="${dec(r1(it[k]))}"></div>`).join('')}
@@ -1565,6 +1567,13 @@ async function viewRegister() {
       renderResult();
     }));
     $$('[data-rm]').forEach((b) => (b.onclick = () => { meta.description = $('#desc').value; items.splice(+b.dataset.rm, 1); renderResult(); }));
+    // "No es el mismo": vuelve a analizar sin usar ese alimento del historial
+    $$('[data-nh]').forEach((b) => (b.onclick = () => {
+      const it = items[+b.dataset.nh];
+      excludeKnown.add(normFood(it.history_name || it.name));
+      toast('Reanalizando sin usar tu registro anterior…');
+      $('#analyze').onclick();
+    }));
     $('#addItem').onclick = () => { meta.description = $('#desc').value; items.push({ name: '', kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }); renderResult(); };
     $('#save').onclick = save;
     $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1582,7 +1591,7 @@ async function viewRegister() {
     if (!photos.length && !comment) { $('#comment').focus(); return toast('Toma una foto o escribe qué comiste (ej: "Huevo duro")', true); }
     const btn = $('#analyze'); busy(btn, true, 'Analizando…');
     try {
-      const known = await knownP;
+      const known = (await knownP).filter((k) => !excludeKnown.has(normFood(k.name)));
       const images = await Promise.all(photos.map(photoBase64));
       const data = await callAI({ images, mimeType: 'image/jpeg', comment, meal: MEALS[$('#meal').value], known });
       items = (data.items || []).map((it) => ({ ...it }));

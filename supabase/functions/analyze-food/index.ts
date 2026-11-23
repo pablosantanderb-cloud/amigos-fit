@@ -24,8 +24,9 @@ Analiza la comida y estima, para la porción que se va a consumir:
 - estima porciones con referencias visuales (plato ~26 cm, cubiertos, manos, envases).
 - incluye aceites, aderezos, salsas y bebidas visibles o mencionadas.
 - si la imagen no contiene comida, devuelve items vacío y explícalo en notes.
-- el nombre de cada item debe ser corto (1 a 3 palabras, ej. 'Arroz', 'Pechuga de pollo'); la cantidad va solo en quantity.
-Responde en español. Los totales deben ser la suma de los items.`;
+- el nombre de cada item debe ser corto (1 a 5 palabras, ej. 'Arroz', 'Pechuga de pollo', 'Pan integral con proteína'); la cantidad va solo en quantity.
+Responde en español. Los totales deben ser la suma de los items.
+NOMBRES: en name incluye SIEMPRE los rasgos que distinguen el producto si el usuario o la etiqueta los indican (marca, 'con proteína', 'light', 'sin azúcar', 'integral', etc.). Ej: 'Pan integral con proteína', 'Yogur protein Soprole', no solo 'Pan' o 'Yogur'.`;
 
 const num = { type: "NUMBER" };
 const SCHEMA = {
@@ -198,7 +199,11 @@ async function handle(req: Request): Promise<Response> {
     if (images.length > 1) parts.push({ text: `Se adjuntan ${images.length} fotos de la MISMA comida (distintos ángulos o distintas partes). Combínalas para estimar mejor las porciones y NO cuentes dos veces un alimento que aparece en más de una foto.` });
     if (comment.trim()) parts.push({ text: `Comentario del usuario: """${comment.slice(0, 1000)}"""` });
     // Alimentos que este usuario ya registró (p. ej. leídos de una etiqueta): se reutilizan sus valores
-    knownRows = (Array.isArray(body.known) ? body.known : []).slice(0, 150).map((k) => (k ?? {}) as Record<string, unknown>);
+    // Versiones especiales (con proteína, light, sin azúcar…) solo si el usuario menciona esa característica ahora;
+    // si no, la IA tiende a confundir 'pancito integral' con 'pan integral con proteína'
+    const said = normName(comment);
+    knownRows = (Array.isArray(body.known) ? body.known : []).slice(0, 150).map((k) => (k ?? {}) as Record<string, unknown>)
+      .filter((k) => SPECIAL.every(([re, said_re]) => !re.test(normName(k.name)) || said_re.test(said)));
     const known = knownRows.map((k) => {
       const o = (k ?? {}) as Record<string, unknown>;
       const n = (v: unknown) => Math.round((Number(v) || 0) * 10) / 10;
@@ -206,7 +211,8 @@ async function handle(req: Request): Promise<Response> {
     }).filter((l) => l.length > 4);
     if (known.length) parts.push({ text: `ALIMENTOS QUE ESTE USUARIO YA REGISTRÓ ANTES (valores confirmados por él, varios leídos de etiquetas nutricionales):
 ${known.join("\n")}
-Si en esta comida aparece o se menciona el MISMO alimento (mismo producto o marca, ej. 'galletas Salmas'), usa ESOS valores escalados proporcionalmente a la cantidad de ahora (por unidades o por gramos) en vez de estimar, y marca from_history = true y pon en history_name el nombre exacto de la lista. En quantity y grams pon SIEMPRE la cantidad de AHORA (ej. 'medio huevo' → quantity '0.5 unidad', grams = la mitad de los gramos de 1 unidad). Ej: si antes 3 unidades = 70 kcal y ahora comió 2, son 47 kcal. Usa el mismo nombre. Si es solo un alimento parecido pero distinto (otra marca o preparación), estímalo normal.` });
+Si en esta comida aparece o se menciona el MISMO alimento (mismo producto o marca, ej. 'galletas Salmas'), usa ESOS valores escalados proporcionalmente a la cantidad de ahora (por unidades o por gramos) en vez de estimar, y marca from_history = true y pon en history_name el nombre exacto de la lista. En quantity y grams pon SIEMPRE la cantidad de AHORA (ej. 'medio huevo' → quantity '0.5 unidad', grams = la mitad de los gramos de 1 unidad). Ej: si antes 3 unidades = 70 kcal y ahora comió 2, son 47 kcal. Usa el mismo nombre. Si es solo un alimento parecido pero distinto (otra marca o preparación), estímalo normal.
+CUIDADO con los productos especiales: si el registrado es una versión especial (con proteína, light, sin azúcar, de una marca, keto, etc.) y el usuario ahora NO dice esa característica (ej. antes 'pan con proteína', ahora solo 'pan integral' o 'pancito'), NO es el mismo: estímalo normal como el producto común. Ante la duda, NO reutilices. Si el usuario dice que es otro o distinto, nunca reutilices.` });
   }
   for (const img of images) parts.push({ inline_data: { mime_type: mimeType, data: img } });
 
@@ -291,6 +297,15 @@ Si en esta comida aparece o se menciona el MISMO alimento (mismo producto o marc
   }
 }
 
+// [rasgo en el nombre del alimento registrado, cómo lo diría el usuario]
+const SPECIAL: [RegExp, RegExp][] = [
+  [/\bprote/, /\bprote/],
+  [/\blight\b|\blite\b/, /\blight\b|\blite\b|\bligh/],
+  [/sin azucar|\bzero\b|\bdiet\b/, /sin azucar|\bzero\b|\bdiet\b/],
+  [/\bketo\b/, /\bketo\b/],
+  [/sin gluten/, /sin gluten/],
+  [/sin lactosa/, /sin lactosa/],
+];
 const normName = (s: unknown) => String(s ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 // Cantidad y unidad al inicio del texto: "2 unidades", "0.5 unidad", "1,5 huevos", "1/2 taza", "medio huevo"
 function leadingQty(q: unknown): { n: number; unit: string } | null {
@@ -324,7 +339,6 @@ function scaleFromHistory(it: Record<string, unknown>, known: Record<string, unk
   it.kcal = Math.round((Number(k.kcal) || 0) * f);
   it.protein_g = r1(k.protein_g); it.carbs_g = r1(k.carbs_g); it.fat_g = r1(k.fat_g);
   if (gK > 0) it.grams = Math.round(gK * f);
-  delete it.history_name;
 }
 
 // Llama a Gemini probando modelos rápidos en orden; devuelve el texto de la respuesta
