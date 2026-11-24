@@ -119,20 +119,22 @@ Reglas:
 - Si pregunta algo fuera de nutrición, ejercicio, salud o la app, redirígelo amablemente.
 - Formato: texto simple. Puedes usar **negrita** y viñetas con "- ". Sin tablas ni títulos con #.`;
 
-// Se usa SIEMPRE el mismo modelo (precisión pareja): gemini-3.5-flash-lite. No se baja a modelos más antiguos
-// o más débiles, y los flash más potentes tardan 1-2 min (nov-2026). Si Google lo satura (503), se reintenta el
-// mismo modelo con pausas crecientes. Solo si Google lo retira se usa el "lite" más nuevo disponible.
-const BEST = "gemini-3.5-flash-lite";
-async function modelOrder(): Promise<string[]> {
-  if (Deno.env.get("GEMINI_MODEL")) return [GEMINI_MODEL];
+// Modelos (medidos con una etiqueta real, 24-nov-2026):
+// - gemini-3.5-flash (razonamiento bajo): leyó bien la etiqueta (141 kcal, 15 g proteína), 7-27 s, casi sin saturación.
+// - gemini-3.5-flash-lite: 2-4 s pero se equivocó (160 kcal, 5 g) y falla con 503 más de la mitad de las veces.
+// Comidas: primero el preciso; el lite solo de respaldo (es el que se usaba antes, nunca uno más débil).
+// Coach: primero el rápido (las respuestas de chat no requieren leer etiquetas).
+const ACCURATE = "gemini-3.5-flash", FAST = "gemini-3.5-flash-lite";
+async function attemptsFor(kind: "food" | "chat"): Promise<string[]> {
+  if (Deno.env.get("GEMINI_MODEL")) return [GEMINI_MODEL, "__pausa__2000", GEMINI_MODEL];
   const available = await flashModels();
-  if (!available.length || available.includes(BEST)) return [BEST];
-  return available.filter((m) => m.includes("lite")).slice(0, 1).concat(available.filter((m) => !m.includes("lite")).slice(0, 1));
+  const ok = (m: string) => !available.length || available.includes(m);
+  const acc = ok(ACCURATE) ? ACCURATE : available.find((m) => !m.includes("lite")) ?? FAST;
+  const fast = ok(FAST) ? FAST : available.find((m) => m.includes("lite")) ?? acc;
+  return kind === "food"
+    ? [acc, fast, "__pausa__2500", fast]
+    : [fast, acc, "__pausa__1500", fast, acc];
 }
-// Intentos: el modelo, y si está saturado, de nuevo tras 1,5 s, 3 s y 5 s (dentro del plazo)
-const attemptsFor = (order: string[]) => order.length === 1
-  ? [order[0], "__pausa__1500", order[0], "__pausa__3000", order[0], "__pausa__5000", order[0]]
-  : order;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const BUSY = "La IA de Google está saturada en este momento (pasa a ratos y dura poco). Espera unos segundos y vuelve a tocar Analizar, o ingresa los valores a mano.";
 
@@ -219,7 +221,7 @@ CUIDADO con los productos especiales: si el registrado es una versión especial 
   // Modelos medidos con una foto real (nov-2026): 3.5-flash-lite y 3.1-flash-lite responden en ~3-4 s con buena
   // calidad; gemini-3.8-flash tardó >60 s. Primero los rápidos conocidos y, si Google los retira, los "lite"/"flash"
   // disponibles que liste la API.
-  const models = attemptsFor(await modelOrder());
+  const models = await attemptsFor("food");
   const baseConfig = { temperature: 0.2, responseMimeType: "application/json", responseSchema: isActivity ? ACTIVITY_SCHEMA : SCHEMA };
   const deadline = Date.now() + 55_000; // responder antes de que el servidor corte la conexión
   let resp: Response | null = null;
@@ -236,7 +238,7 @@ CUIDADO con los productos especiales: si el registrado es una versión especial 
           method: "POST",
           headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
           body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig }),
-          signal: AbortSignal.timeout(Math.min(model.includes("lite") ? 15_000 : 25_000, left)),
+          signal: AbortSignal.timeout(Math.min(model.includes("lite") ? 12_000 : 35_000, left)),
         });
       } catch (e) {
         lastErr = { status: 504, message: `sin respuesta de ${model} (${(e as Error).name})` };
@@ -343,7 +345,7 @@ function scaleFromHistory(it: Record<string, unknown>, known: Record<string, unk
 
 // Llama a Gemini probando modelos rápidos en orden; devuelve el texto de la respuesta
 async function gemini(payload: Record<string, unknown>, temperature: number): Promise<{ text?: string; status?: number; message?: string }> {
-  const models = attemptsFor(await modelOrder());
+  const models = await attemptsFor("chat");
   const deadline = Date.now() + 50_000;
   let last = { status: 0, message: "" };
   for (const model of models) {
@@ -355,8 +357,8 @@ async function gemini(payload: Record<string, unknown>, temperature: number): Pr
       resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
-        body: JSON.stringify({ ...payload, generationConfig: { temperature, maxOutputTokens: 1200 } }),
-        signal: AbortSignal.timeout(Math.min(25_000, left)),
+        body: JSON.stringify({ ...payload, generationConfig: { temperature, maxOutputTokens: 2500, ...(model.includes("lite") ? {} : { thinkingConfig: { thinkingLevel: "low" } }) } }),
+        signal: AbortSignal.timeout(Math.min(model.includes("lite") ? 12_000 : 25_000, left)),
       });
     } catch (e) { last = { status: 504, message: (e as Error).name }; continue; }
     if (resp.ok) {
