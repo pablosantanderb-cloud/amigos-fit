@@ -143,7 +143,7 @@ async function renderSyncCard() {
 }
 
 const SHORTCUT_NAME = 'Amigos Fit Salud';
-const APP_V = 66;
+const APP_V = 67;
 // Saltos automáticos al Atajo: se pueden apagar (Perfil) y quedan registrados para diagnosticar
 const autoSyncOn = () => lsStr('afAutoSync') !== '0';
 function logJump(why) {
@@ -1595,7 +1595,7 @@ async function viewRegister() {
   $('#analyze').onclick = async () => {
     const comment = $('#comment').value.trim();
     if (!photos.length && !comment) { $('#comment').focus(); return toast('Toma una foto o escribe qué comiste (ej: "Huevo duro")', true); }
-    const btn = $('#analyze'); busy(btn, true, 'Analizando…');
+    const btn = $('#analyze'); busy(btn, true, 'Analizando con precisión… (10–20 s)');
     try {
       const known = (await knownP).filter((k) => !excludeKnown.has(normFood(k.name)));
       const images = await Promise.all(photos.map(photoBase64));
