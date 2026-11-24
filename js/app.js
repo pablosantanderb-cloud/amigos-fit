@@ -90,6 +90,7 @@ async function renderSyncCard() {
     ${row ? `
       <div class="sync-row"><span class="small muted">Dirección</span><code>${esc(SYNC_URL)}</code>${copyBtn('Copiar dirección', SYNC_URL)}</div>
       <div class="sync-row"><span class="small muted">Tu código personal (no lo compartas)</span><code>${esc(row.token.slice(0, 6))}••••••••${esc(row.token.slice(-4))}</code>${copyBtn('Copiar código', row.token)}</div>
+      ${isStandalone() ? '' : `<p class="small warn-box">⚠️ Estás usando Amigos Fit dentro de Safari, así que no se actualiza sola con el reloj. Para que funcione como app: en Safari toca <b>Compartir</b> → <b>Agregar a inicio</b>, deja activado <b>«Abrir como app web»</b> y usa ese ícono (borra el anterior).</p>`}
       <label class="check"><input type="checkbox" id="autoSync" ${autoSyncOn() ? 'checked' : ''}> Actualizar con el reloj al abrir la app (si el último dato tiene más de 2 h). Apágalo si prefieres que abra más rápido; igual tienes el botón 🔄 en Hoy.</label>
       <p class="small muted">Versión de la app: ${APP_V} · Saltos automáticos recientes: ${(() => { try { const l = JSON.parse(localStorage.getItem('afJumpLog') || '[]'); return l.length ? l.map((x) => `${new Date(x.t).toLocaleString('es-CL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: C.TZ })} (${esc(x.why)})`).join(', ') : 'ninguno'; } catch { return '—'; } })()}</p>
       <p class="small">${row.last_used_at ? `✅ Última sincronización: ${new Date(row.last_used_at).toLocaleString('es-CL', { dateStyle: 'medium', timeStyle: 'short', timeZone: C.TZ })}` : '⏳ Aún no se ha recibido ninguna sincronización.'}</p>
@@ -142,7 +143,7 @@ async function renderSyncCard() {
 }
 
 const SHORTCUT_NAME = 'Amigos Fit Salud';
-const APP_V = 65;
+const APP_V = 66;
 // Saltos automáticos al Atajo: se pueden apagar (Perfil) y quedan registrados para diagnosticar
 const autoSyncOn = () => lsStr('afAutoSync') !== '0';
 function logJump(why) {
@@ -164,7 +165,11 @@ document.addEventListener('visibilitychange', () => {
 });
 // Abre el Atajo y, al terminar, vuelve a Amigos Fit
 const SHORTCUT_YESTERDAY = 'Amigos Fit Ayer';
-const shortcutUrl = (name = SHORTCUT_NAME) => `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(name)}&x-success=${encodeURIComponent(BASE_URL + '#/hoy')}`;
+// Sin x-success: iOS abre esa dirección de vuelta en Safari (nunca en la app del ícono de inicio), y ahí Safari
+// pide "¿Abrir esta página en Atajos?". Al terminar el Atajo se vuelve con "◀ Amigos Fit" (arriba a la izquierda).
+const shortcutUrl = (name = SHORTCUT_NAME) => `shortcuts://run-shortcut?name=${encodeURIComponent(name)}`;
+// ¿Corre como app del ícono de inicio (no dentro de Safari)?
+const isStandalone = () => navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
 function agoTxt(iso) {
   const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
   if (m < 1) return 'recién';
@@ -1206,13 +1211,14 @@ async function viewToday() {
   const shortcutWorks = syncRow?.last_used_at && Date.now() - new Date(syncRow.last_used_at).getTime() < 7 * 86400000;
   // Si ayer quedó sin cierre (la automatización de las 23:55 no puede leer Salud con el iPhone bloqueado),
   // ejecuta "Amigos Fit Ayer", que cierra ayer y luego corre "Amigos Fit Salud" para hoy. Una vez por día.
-  if (yesterdayOpen && isToday && lsStr('afYestJump') !== d && document.visibilityState === 'visible') {
+  // Los saltos automáticos solo desde la app del ícono: en Safari cada salto pide confirmación
+  if (yesterdayOpen && isStandalone() && isToday && lsStr('afYestJump') !== d && document.visibilityState === 'visible') {
     lsSet('afYestJump', d);
     logJump('cierre de ayer');
     lsSet('afSyncJump', Date.now());
     state.syncJumpAt = Date.now();
     location.href = shortcutUrl(SHORTCUT_YESTERDAY);
-  } else if (autoSyncOn() && hasSync && shortcutWorks && isToday && liveAge > 120 && Date.now() - lsNum('afSyncJump') > 60 * 60000 && document.visibilityState === 'visible') {
+  } else if (autoSyncOn() && isStandalone() && hasSync && shortcutWorks && isToday && liveAge > 120 && Date.now() - lsNum('afSyncJump') > 60 * 60000 && document.visibilityState === 'visible') {
     lsSet('afSyncJump', Date.now());
     logJump(liveAge === Infinity ? 'sin dato de hoy' : `dato de hace ${Math.round(liveAge / 60)} h`);
     state.syncJumpAt = Date.now();
