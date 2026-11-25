@@ -143,7 +143,7 @@ async function renderSyncCard() {
 }
 
 const SHORTCUT_NAME = 'Amigos Fit Salud';
-const APP_V = 68;
+const APP_V = 69;
 // Saltos automáticos al Atajo: se pueden apagar (Perfil) y quedan registrados para diagnosticar
 // Apagado por defecto: al terminar el Atajo, iOS se queda en la app Atajos (no puede volver solo a una app web)
 const autoSyncOn = () => lsStr('afAutoSync2') === '1';
@@ -1431,7 +1431,7 @@ async function knownFoods() {
     for (const l of data || []) for (const it of Array.isArray(l.items) ? l.items : []) {
       const key = String(it?.name || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       if (!key || !(Number(it.kcal) > 0) || seen.has(key)) continue;
-      seen.set(key, { name: it.name, quantity: it.quantity || '', grams: it.grams || null, kcal: it.kcal, protein_g: it.protein_g, carbs_g: it.carbs_g, fat_g: it.fat_g });
+      seen.set(key, { name: it.name, brand: it.brand || '', quantity: it.quantity || '', grams: it.grams || null, kcal: it.kcal, protein_g: it.protein_g, carbs_g: it.carbs_g, fat_g: it.fat_g });
     }
     return [...seen.values()].slice(0, 150);
   } catch { return []; }
@@ -1574,12 +1574,24 @@ async function viewRegister() {
       renderResult();
     }));
     $$('[data-rm]').forEach((b) => (b.onclick = () => { meta.description = $('#desc').value; items.splice(+b.dataset.rm, 1); renderResult(); }));
-    // "No es el mismo": vuelve a analizar sin usar ese alimento del historial
-    $$('[data-nh]').forEach((b) => (b.onclick = () => {
-      const it = items[+b.dataset.nh];
+    // "No es el mismo": la IA reanaliza SOLO ese alimento (con las fotos y el texto), sin usar ese registro;
+    // los demás alimentos quedan como están
+    $$('[data-nh]').forEach((b) => (b.onclick = async () => {
+      const i = +b.dataset.nh, it = items[i];
+      meta.description = $('#desc').value;
       excludeKnown.add(normFood(it.history_name || it.name));
-      toast('Reanalizando sin usar tu registro anterior…');
-      $('#analyze').onclick();
+      busy(b, true, 'Reanalizando…');
+      try {
+        const known = (await knownP).filter((k) => !excludeKnown.has(normFood(k.name)));
+        const images = await Promise.all(photos.map(photoBase64));
+        const data = await callAI({ images, mimeType: 'image/jpeg', comment: $('#comment').value.trim(), meal: MEALS[$('#meal').value], known,
+          focus: { name: it.name, quantity: it.quantity || '', not: it.history_name || it.name } });
+        const fresh = (data.items || []).map((x) => ({ ...x }));
+        if (!fresh.length) throw new Error('La IA no devolvió el alimento, corrígelo a mano');
+        items.splice(i, 1, ...fresh);
+        toast('Listo: recalculado sin tu registro anterior');
+        renderResult();
+      } catch (e) { toast(e.message, true); busy(b, false); }
     }));
     $('#addItem').onclick = () => { meta.description = $('#desc').value; items.push({ name: '', kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0 }); renderResult(); };
     $('#save').onclick = save;

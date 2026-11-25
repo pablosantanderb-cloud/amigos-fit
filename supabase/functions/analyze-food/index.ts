@@ -26,6 +26,7 @@ Analiza la comida y estima, para la porción que se va a consumir:
 - si la imagen no contiene comida, devuelve items vacío y explícalo en notes.
 - el nombre de cada item debe ser corto (1 a 5 palabras, ej. 'Arroz', 'Pechuga de pollo', 'Pan integral con proteína'); la cantidad va solo en quantity.
 Responde en español. Los totales deben ser la suma de los items.
+MARCA: si en la foto (etiqueta, envase) o en el comentario aparece la marca de un producto, ponla en brand y también en name.
 NOMBRES: en name incluye SIEMPRE los rasgos que distinguen el producto si el usuario o la etiqueta los indican (marca, 'con proteína', 'light', 'sin azúcar', 'integral', etc.). Ej: 'Pan integral con proteína', 'Yogur protein Soprole', no solo 'Pan' o 'Yogur'.`;
 
 const num = { type: "NUMBER" };
@@ -43,6 +44,7 @@ const SCHEMA = {
           grams: num, kcal: num, protein_g: num, carbs_g: num, fat_g: num,
           from_history: { type: "BOOLEAN", description: "true si los valores salieron de un alimento que el usuario ya registró antes" },
           history_name: { type: "STRING", description: "si from_history: el nombre EXACTO del alimento de la lista de ya registrados" },
+          brand: { type: "STRING", description: "MARCA del producto si se ve en la etiqueta/envase o el usuario la dice (ej. 'Ideal', 'Soprole'); vacío si no hay marca" },
         },
         required: ["name", "quantity", "grams", "kcal", "protein_g", "carbs_g", "fat_g"],
       },
@@ -205,15 +207,22 @@ async function handle(req: Request): Promise<Response> {
     // si no, la IA tiende a confundir 'pancito integral' con 'pan integral con proteína'
     const said = normName(comment);
     knownRows = (Array.isArray(body.known) ? body.known : []).slice(0, 150).map((k) => (k ?? {}) as Record<string, unknown>)
-      .filter((k) => SPECIAL.every(([re, said_re]) => !re.test(normName(k.name)) || said_re.test(said)));
+      .filter((k) => knownEligible(k, said, images.length > 0));
+    // "No es el mismo": reanalizar SOLO ese alimento, sin usar el registro que el usuario descartó
+    const focus = (body.focus ?? null) as { name?: string; quantity?: string; not?: string } | null;
+    if (focus?.name) {
+      const notN = normName(focus.not || focus.name);
+      knownRows = knownRows.filter((k) => normName(k.name) !== notN);
+      parts.push({ text: `IMPORTANTE: analiza SOLO este alimento de la comida: '${String(focus.name).slice(0, 80)}'${focus.quantity ? ` (cantidad: ${String(focus.quantity).slice(0, 60)})` : ""}. El usuario aclaró que NO es '${String(focus.not || focus.name).slice(0, 80)}' de su registro anterior: estímalo de nuevo según la foto y lo que escribió, sin usar ese registro. Devuelve en items SOLO ese alimento (ningún otro), con un name que lo distinga.` });
+    }
     const known = knownRows.map((k) => {
       const o = (k ?? {}) as Record<string, unknown>;
       const n = (v: unknown) => Math.round((Number(v) || 0) * 10) / 10;
-      return `- ${String(o.name ?? "").slice(0, 60)} | ${String(o.quantity ?? "").slice(0, 60)}${o.grams ? ` | ${n(o.grams)} g` : ""} | ${n(o.kcal)} kcal | P ${n(o.protein_g)} | C ${n(o.carbs_g)} | G ${n(o.fat_g)}`;
+      return `- ${String(o.name ?? "").slice(0, 60)}${o.brand ? ` (marca ${String(o.brand).slice(0, 40)})` : ""} | ${String(o.quantity ?? "").slice(0, 60)}${o.grams ? ` | ${n(o.grams)} g` : ""} | ${n(o.kcal)} kcal | P ${n(o.protein_g)} | C ${n(o.carbs_g)} | G ${n(o.fat_g)}`;
     }).filter((l) => l.length > 4);
     if (known.length) parts.push({ text: `ALIMENTOS QUE ESTE USUARIO YA REGISTRÓ ANTES (valores confirmados por él, varios leídos de etiquetas nutricionales):
 ${known.join("\n")}
-Si en esta comida aparece o se menciona el MISMO alimento (mismo producto o marca, ej. 'galletas Salmas'), usa ESOS valores escalados proporcionalmente a la cantidad de ahora (por unidades o por gramos) en vez de estimar, y marca from_history = true y pon en history_name el nombre exacto de la lista. En quantity y grams pon SIEMPRE la cantidad de AHORA (ej. 'medio huevo' → quantity '0.5 unidad', grams = la mitad de los gramos de 1 unidad). Ej: si antes 3 unidades = 70 kcal y ahora comió 2, son 47 kcal. Usa el mismo nombre. Si es solo un alimento parecido pero distinto (otra marca o preparación), estímalo normal.
+Si en esta comida aparece o se menciona el MISMO alimento (mismo producto Y misma marca si tiene, ej. 'galletas Salmas'), usa ESOS valores escalados proporcionalmente a la cantidad de ahora (por unidades o por gramos) en vez de estimar, y marca from_history = true y pon en history_name el nombre exacto de la lista. En quantity y grams pon SIEMPRE la cantidad de AHORA (ej. 'medio huevo' → quantity '0.5 unidad', grams = la mitad de los gramos de 1 unidad). Ej: si antes 3 unidades = 70 kcal y ahora comió 2, son 47 kcal. Usa el mismo nombre. Si es solo un alimento parecido pero distinto (otra marca o preparación), estímalo normal. Si el registrado tiene marca y en la foto no se ve esa marca ni el usuario la nombra, NO es el mismo.
 CUIDADO con los productos especiales: si el registrado es una versión especial (con proteína, light, sin azúcar, de una marca, keto, etc.) y el usuario ahora NO dice esa característica (ej. antes 'pan con proteína', ahora solo 'pan integral' o 'pancito'), NO es el mismo: estímalo normal como el producto común. Ante la duda, NO reutilices. Si el usuario dice que es otro o distinto, nunca reutilices.` });
   }
   for (const img of images) parts.push({ inline_data: { mime_type: mimeType, data: img } });
@@ -327,6 +336,28 @@ const SPECIAL: [RegExp, RegExp][] = [
   [/sin gluten/, /sin gluten/],
   [/sin lactosa/, /sin lactosa/],
 ];
+// ¿Se puede reutilizar este alimento del historial? Antes bastaba la palabra 'pan' para que la IA asumiera el
+// 'Pan integral con proteína' registrado. Ahora:
+// - con marca registrada: el usuario debe nombrar la marca y el tipo de alimento (ej. '2 rebanadas de pan Ideal'),
+//   o mandar foto (la IA solo lo usa si ve esa marca en el envase);
+// - sin marca: el usuario debe mencionar TODAS las palabras del nombre (ej. 'huevo duro', no solo 'huevo').
+const STOP = new Set(["de", "del", "con", "sin", "la", "el", "los", "las", "y", "en", "al", "a", "un", "una", "tipo"]);
+const toks = (s: unknown) => normName(s).split(" ").filter((w) => w.length >= 2 && !STOP.has(w));
+function saysWord(said: string[], tok: string): boolean {
+  const stem = tok.length > 4 ? tok.slice(0, tok.length - 2) : tok; // plurales y diminutivos: pan→pancito, galletas→galleta
+  return said.some((w) => w.startsWith(stem) || (w.length >= 3 && tok.startsWith(w)));
+}
+function knownEligible(k: Record<string, unknown>, saidText: string, hasImages: boolean): boolean {
+  const said = saidText.split(" ").filter(Boolean);
+  const brandT = toks(k.brand);
+  const nameT = toks(k.name).filter((t) => !brandT.includes(t));
+  const special = SPECIAL.every(([re, said_re]) => !re.test(normName(k.name)) || said_re.test(saidText));
+  if (brandT.length) {
+    if (brandT.every((t) => saysWord(said, t))) return !nameT.length || saysWord(said, nameT[0]) || hasImages;
+    return hasImages; // con foto la IA verifica la marca en el envase (instrucción: mismo producto Y misma marca)
+  }
+  return nameT.length > 0 && nameT.every((t) => saysWord(said, t)) && special;
+}
 const normName = (s: unknown) => String(s ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 // Cantidad y unidad al inicio del texto: "2 unidades", "0.5 unidad", "1,5 huevos", "1/2 taza", "medio huevo"
 function leadingQty(q: unknown): { n: number; unit: string } | null {
