@@ -221,47 +221,66 @@ CUIDADO con los productos especiales: si el registrado es una versión especial 
   // Modelos medidos con una foto real (nov-2026): 3.5-flash-lite y 3.1-flash-lite responden en ~3-4 s con buena
   // calidad; gemini-3.8-flash tardó >60 s. Primero los rápidos conocidos y, si Google los retira, los "lite"/"flash"
   // disponibles que liste la API.
-  const models = await attemptsFor("food");
+  // Se consultan el modelo preciso y el rápido EN PARALELO (Google satura a ratos uno u otro, nov-2026):
+  // se usa el preciso si responde; si el rápido responde primero, se espera al preciso hasta 12 s más.
+  const [acc, fast] = await (async () => { const m = await attemptsFor("food"); return [m[0], m.find((x, i) => i > 0 && !x.startsWith("__")) ?? m[0]]; })();
   const baseConfig = { temperature: 0.2, responseMimeType: "application/json", responseSchema: isActivity ? ACTIVITY_SCHEMA : SCHEMA };
   const deadline = Date.now() + 55_000; // responder antes de que el servidor corte la conexión
-  let resp: Response | null = null;
-  let lastErr = { status: 0, message: "" };
-  outer: for (const model of models) {
-    if (model.startsWith("__pausa__")) { const ms = Number(model.slice(9)); if (deadline - Date.now() > ms + 12_000) { await sleep(ms); continue; } break; }
-    // Los modelos 3.x "piensan" antes de responder; pedimos razonamiento bajo para que sea rápido.
-    const configs = /^gemini-[3-9]/.test(model) && !model.includes("lite") ? [{ ...baseConfig, thinkingConfig: { thinkingLevel: "low" } }, baseConfig] : [baseConfig];
+  type Try = { ok: true; text: string; model: string } | { ok: false; status: number; message: string };
+  const ctrl = new AbortController();
+  const ask = async (model: string, timeout: number): Promise<Try> => {
+    const thinking = /^gemini-[3-9]/.test(model) && !model.includes("lite");
+    const configs = thinking ? [{ ...baseConfig, thinkingConfig: { thinkingLevel: "low" } }, baseConfig] : [baseConfig];
+    let err: Try = { ok: false, status: 504, message: "la IA tardó demasiado" };
     for (const generationConfig of configs) {
       const left = deadline - Date.now();
-      if (left < 5_000) { lastErr = { status: 504, message: "la IA tardó demasiado" }; break outer; }
+      if (left < 3_000) return err;
       try {
-        resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
           body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig }),
-          signal: AbortSignal.timeout(Math.min(model.includes("lite") ? 12_000 : 35_000, left)),
+          signal: AbortSignal.any([ctrl.signal, AbortSignal.timeout(Math.min(timeout, left))]),
         });
+        const t = await r.text();
+        if (r.ok) return { ok: true, text: t, model };
+        let message = t.slice(0, 300);
+        try { message = JSON.parse(t)?.error?.message ?? message; } catch { /* texto plano */ }
+        console.error("Gemini error", model, r.status, message);
+        err = { ok: false, status: r.status, message };
+        if (r.status === 400 && /thinking/i.test(message)) continue;
+        return err;
       } catch (e) {
-        lastErr = { status: 504, message: `sin respuesta de ${model} (${(e as Error).name})` };
         console.error("Gemini timeout/red", model, e);
-        resp = null;
-        continue outer;
+        return { ok: false, status: 504, message: `sin respuesta de ${model} (${(e as Error).name})` };
       }
-      if (resp.ok) break outer;
-      const detail = await resp.text();
-      let message = detail.slice(0, 300);
-      try { message = JSON.parse(detail)?.error?.message ?? message; } catch { /* texto plano */ }
-      lastErr = { status: resp.status, message };
-      console.error("Gemini error", model, resp.status, message);
-      resp = null;
-      // Si el problema fue el parámetro de razonamiento, reintenta el mismo modelo sin él
-      if (lastErr.status === 400 && /thinking/i.test(message)) continue;
-      // Otro modelo solo si este no existe, no está disponible o está saturado
-      if (![404, 429, 500, 503].includes(lastErr.status)) break outer;
-      continue outer;
     }
-  }
+    return err;
+  };
+  // El rápido reintenta si Google lo satura (hasta 4 veces, con pausas cortas)
+  const fastChain = async (): Promise<Try> => {
+    let r: Try = { ok: false, status: 504, message: "" };
+    for (const pause of [0, 1500, 2500, 4000]) {
+      if (pause) { if (deadline - Date.now() < pause + 8_000) break; await sleep(pause); }
+      r = await ask(fast, 15_000);
+      if (r.ok || ![429, 500, 503, 504].includes(r.status)) return r;
+    }
+    return r;
+  };
+  const accP = ask(acc, 45_000);
+  const fastP = acc === fast ? accP : fastChain();
+  const first = await Promise.race([accP.then((r) => ({ k: "acc", r })), fastP.then((r) => ({ k: "fast", r }))]);
+  let won: Try;
+  if (first.k === "acc") won = first.r.ok ? first.r : await fastP;
+  else if (first.r.ok) {
+    const late = await Promise.race([accP, sleep(12_000).then(() => null)]);
+    won = late && late.ok ? late : first.r;
+  } else { const a2 = await accP; won = a2.ok ? a2 : first.r; }
+  ctrl.abort(); // corta la consulta que quedó pendiente
+  if (won.ok) console.log("modelo usado", won.model);
 
-  if (!resp || !resp.ok) {
+  if (!won.ok) {
+    const lastErr = won;
     const msg = lastErr.status === 503 || lastErr.status === 500 || lastErr.status === 504
       ? BUSY
       : lastErr.status === 429
@@ -274,7 +293,7 @@ CUIDADO con los productos especiales: si el registrado es una versión especial 
     return json({ error: msg }, 502);
   }
 
-  const data = await resp.json();
+  const data = JSON.parse(won.text);
   const text = data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "";
   try {
     const result = JSON.parse(text);
