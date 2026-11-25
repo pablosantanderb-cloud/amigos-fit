@@ -208,6 +208,24 @@ async function handle(req: Request): Promise<Response> {
     const said = normName(comment);
     knownRows = (Array.isArray(body.known) ? body.known : []).slice(0, 150).map((k) => (k ?? {}) as Record<string, unknown>)
       .filter((k) => knownEligible(k, said, images.length > 0));
+    // Si varios del mismo tipo y rasgo calzan (ej. 2 panes con proteína), queda solo el más reciente
+    // (la lista viene del más reciente al más antiguo); si el usuario nombra una marca, gana ese producto.
+    {
+      const saidW = said.split(" ").filter(Boolean);
+      const brandSaid = (k: Record<string, unknown>) => toks(k.brand).length > 0 && toks(k.brand).every((t) => saysWord(saidW, t));
+      const sig = (k: Record<string, unknown>) => {
+        const n = normName(k.name), brandT = toks(k.brand);
+        const base = toks(k.name).filter((t) => !brandT.includes(t))[0] ?? n;
+        return base.slice(0, 4) + "|" + SPECIAL.map(([re]) => (re.test(n) ? 1 : 0)).join("");
+      };
+      const seenSig = new Set<string>();
+      knownRows = [...knownRows.filter(brandSaid), ...knownRows.filter((k) => !brandSaid(k))].filter((k) => {
+        const g = sig(k);
+        if (!g.includes("1")) return true; // alimentos comunes: sin deduplicar
+        if (seenSig.has(g)) return false;
+        seenSig.add(g); return true;
+      });
+    }
     // "No es el mismo": reanalizar SOLO ese alimento, sin usar el registro que el usuario descartó
     const focus = (body.focus ?? null) as { name?: string; quantity?: string; not?: string } | null;
     if (focus?.name) {
@@ -222,6 +240,7 @@ async function handle(req: Request): Promise<Response> {
     }).filter((l) => l.length > 4);
     if (known.length) parts.push({ text: `ALIMENTOS QUE ESTE USUARIO YA REGISTRÓ ANTES (valores confirmados por él, varios leídos de etiquetas nutricionales):
 ${known.join("\n")}
+(La lista va del registro MÁS RECIENTE al más antiguo: si varios calzan con lo que dice el usuario, ej. 'pan proteico', usa el más reciente.)
 Si en esta comida aparece o se menciona el MISMO alimento (mismo producto Y misma marca si tiene, ej. 'galletas Salmas'), usa ESOS valores escalados proporcionalmente a la cantidad de ahora (por unidades o por gramos) en vez de estimar, y marca from_history = true y pon en history_name el nombre exacto de la lista. En quantity y grams pon SIEMPRE la cantidad de AHORA (ej. 'medio huevo' → quantity '0.5 unidad', grams = la mitad de los gramos de 1 unidad). Ej: si antes 3 unidades = 70 kcal y ahora comió 2, son 47 kcal. Usa el mismo nombre. Si es solo un alimento parecido pero distinto (otra marca o preparación), estímalo normal. Si el registrado tiene marca y en la foto no se ve esa marca ni el usuario la nombra, NO es el mismo.
 CUIDADO con los productos especiales: si el registrado es una versión especial (con proteína, light, sin azúcar, de una marca, keto, etc.) y el usuario ahora NO dice esa característica (ej. antes 'pan con proteína', ahora solo 'pan integral' o 'pancito'), NO es el mismo: estímalo normal como el producto común. Ante la duda, NO reutilices. Si el usuario dice que es otro o distinto, nunca reutilices.` });
   }
@@ -340,7 +359,8 @@ const SPECIAL: [RegExp, RegExp][] = [
 // 'Pan integral con proteína' registrado. Ahora:
 // - con marca registrada: el usuario debe nombrar la marca y el tipo de alimento (ej. '2 rebanadas de pan Ideal'),
 //   o mandar foto (la IA solo lo usa si ve esa marca en el envase);
-// - sin marca: el usuario debe mencionar TODAS las palabras del nombre (ej. 'huevo duro', no solo 'huevo').
+// - con rasgo especial (con proteína, light…): basta el tipo + el rasgo ('pan proteico');
+// - si no: el usuario debe mencionar TODAS las palabras del nombre (ej. 'huevo duro', no solo 'huevo').
 const STOP = new Set(["de", "del", "con", "sin", "la", "el", "los", "las", "y", "en", "al", "a", "un", "una", "tipo"]);
 const toks = (s: unknown) => normName(s).split(" ").filter((w) => w.length >= 2 && !STOP.has(w));
 function saysWord(said: string[], tok: string): boolean {
@@ -354,9 +374,14 @@ function knownEligible(k: Record<string, unknown>, saidText: string, hasImages: 
   const special = SPECIAL.every(([re, said_re]) => !re.test(normName(k.name)) || said_re.test(saidText));
   if (brandT.length) {
     if (brandT.every((t) => saysWord(said, t))) return !nameT.length || saysWord(said, nameT[0]) || hasImages;
-    return hasImages; // con foto la IA verifica la marca en el envase (instrucción: mismo producto Y misma marca)
+    if (hasImages) return true; // con foto la IA verifica la marca en el envase (instrucción: mismo producto Y misma marca)
   }
-  return nameT.length > 0 && nameT.every((t) => saysWord(said, t)) && special;
+  if (!nameT.length || !special) return false;
+  // Con un rasgo especial (con proteína, light…) basta el tipo de alimento + ese rasgo, tenga o no marca:
+  // 'pan proteico' → el último pan con proteína registrado. Sin rasgo especial: marca o todas las palabras.
+  const hasSpecial = SPECIAL.some(([re]) => re.test(normName(k.name)));
+  if (hasSpecial) return saysWord(said, nameT[0]);
+  return !brandT.length && nameT.every((t) => saysWord(said, t));
 }
 const normName = (s: unknown) => String(s ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 // Cantidad y unidad al inicio del texto: "2 unidades", "0.5 unidad", "1,5 huevos", "1/2 taza", "medio huevo"
