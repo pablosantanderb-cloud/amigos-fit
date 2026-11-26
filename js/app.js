@@ -143,7 +143,7 @@ async function renderSyncCard() {
 }
 
 const SHORTCUT_NAME = 'Amigos Fit Salud';
-const APP_V = 73;
+const APP_V = 74;
 // Saltos automáticos al Atajo: se pueden apagar (Perfil) y quedan registrados para diagnosticar
 // Apagado por defecto: al terminar el Atajo, iOS se queda en la app Atajos (no puede volver solo a una app web)
 const autoSyncOn = () => lsStr('afAutoSync2') === '1';
@@ -157,6 +157,23 @@ function logJump(why) {
 const lsStr = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 const lsNum = (k) => { try { return Number(localStorage.getItem(k)) || 0; } catch { return 0; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch { /* sin almacenamiento */ } };
+// Actualización automática: el iPhone guarda la página en caché y a veces sigue abriendo una versión vieja.
+// Al abrir (y al volver a la app) se consulta index.html sin caché; si trae una versión más nueva, se recarga
+// con una dirección distinta (?v=N), que obliga a descargarla. No interrumpe un registro a medio hacer.
+async function checkUpdate() {
+  try {
+    const h = location.hash.replace(/^#\/?/, '');
+    if (h.startsWith('registrar') || h.startsWith('editar') || document.querySelector('.coach-ov')) return;
+    const html = await (await fetch(`${BASE_URL}?nc=${Date.now()}`, { cache: 'no-store' })).text();
+    const v = Number(html.match(/app\.js\?v=(\d+)/)?.[1]);
+    if (!(v > APP_V)) return;
+    if (lsStr('afUpdTry') === String(v)) return; // ya se intentó con esta versión: no insistir en bucle
+    lsSet('afUpdTry', v);
+    location.replace(`${BASE_URL}?v=${v}${location.hash}`);
+  } catch { /* sin conexión */ }
+}
+setTimeout(checkUpdate, 1500);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkUpdate(); });
 // Al volver desde Atajos, recarga Hoy un par de veces mientras llegan los datos del reloj
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || !state.syncJumpAt || Date.now() - state.syncJumpAt > 5 * 60000) return;
