@@ -106,7 +106,7 @@ async function renderSyncCard() {
             <li><code>active_kcal</code> (Número) = resultado del paso 3</li>
             <li><code>resting_kcal</code> (Número) = resultado del paso 5</li></ul></li>
           <li>Agrega <b>Mostrar resultado</b> (opcional) y toca ▶️ para probarlo. La primera vez acepta el permiso para leer Salud. Debe decir “✅ Amigos Fit: … guardado”.</li>
-          <li>Datos en vivo: no necesitas automatización. Cada vez que abres Amigos Fit y tu último dato tiene más de 30 min, la app ejecuta el Atajo sola (salta a Atajos y vuelve) y tu meta se ajusta con lo que llevas.</li>
+          <li>Datos en vivo: en Hoy toca <b>🔄 Actualizar</b> cuando quieras (corre el Atajo; vuelve con «◀ Amigos Fit» arriba a la izquierda) y tu meta se ajusta con lo que llevas.</li>
           <li>Automatización 2 (cierre del día): <b>＋</b> → <b>Hora del día</b>: <b>23:55</b>, <b>Diariamente</b> → <b>Ejecutar inmediatamente</b> → “Amigos Fit Salud”. Lo enviado desde las 23:30 se guarda como cierre del día.</li>
         </ol>
         <p class="muted">Si un día el teléfono estaba apagado a esa hora, ingresa ese cierre a mano en Hoy. Correrlo de nuevo el mismo día solo actualiza el dato.</p>
@@ -143,7 +143,7 @@ async function renderSyncCard() {
 }
 
 const SHORTCUT_NAME = 'Amigos Fit Salud';
-const APP_V = 69;
+const APP_V = 70;
 // Saltos automáticos al Atajo: se pueden apagar (Perfil) y quedan registrados para diagnosticar
 // Apagado por defecto: al terminar el Atajo, iOS se queda en la app Atajos (no puede volver solo a una app web)
 const autoSyncOn = () => lsStr('afAutoSync2') === '1';
