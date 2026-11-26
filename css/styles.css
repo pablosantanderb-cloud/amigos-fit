@@ -414,3 +414,7 @@ table.bal tr.sum td { font-weight: 700; border-top: 1px solid var(--line); }
 .hist-x { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 99px; padding: 1px 8px; font-size: .78rem; margin-left: 4px; cursor: pointer; }
 
 .warn-box { background: rgba(234,179,8,.12); border: 1px solid rgba(234,179,8,.4); border-radius: 12px; padding: 10px 12px; }
+
+.gseg { flex-wrap: wrap; }
+.gseg { display: flex; gap: 6px; }
+.gseg button { flex: 1 1 auto; white-space: nowrap; padding: 8px 12px; }

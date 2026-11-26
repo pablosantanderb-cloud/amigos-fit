@@ -143,7 +143,7 @@ async function renderSyncCard() {
 }
 
 const SHORTCUT_NAME = 'Amigos Fit Salud';
-const APP_V = 70;
+const APP_V = 71;
 // Saltos automáticos al Atajo: se pueden apagar (Perfil) y quedan registrados para diagnosticar
 // Apagado por defecto: al terminar el Atajo, iOS se queda en la app Atajos (no puede volver solo a una app web)
 const autoSyncOn = () => lsStr('afAutoSync2') === '1';
@@ -1965,9 +1965,8 @@ async function viewFriends() {
   app.innerHTML = `
   <h1>Amigos</h1>
   ${groups.length ? `<div class="card">
-    <div class="row between wrap">
-      <select id="gsel" style="flex:1;min-width:160px">${groups.map((x) => `<option value="${x.id}" ${x.id === state.groupId ? 'selected' : ''}>👥 ${esc(x.name)}</option>`).join('')}</select>
-    </div>
+    ${groups.length > 1 ? `<div class="small muted">Tus grupos (${groups.length}) · toca uno para verlo</div>` : ''}
+    <div class="seg gseg" style="margin-top:6px">${groups.map((x) => `<button type="button" data-gid="${x.id}" class="${x.id === state.groupId ? 'active' : ''}">👥 ${esc(x.name)}</button>`).join('')}</div>
     <div class="row between" style="margin-top:12px">
       <div><div class="small muted">Código de invitación</div><div class="code">${esc(g.invite_code)}</div></div>
       <button id="share" class="btn sm">Invitar amigos</button>
@@ -1991,7 +1990,8 @@ async function viewFriends() {
   </details>` : `<div class="card"><p>Aún no estás en ningún grupo. Crea uno e invita a tus amigos con el código, o únete con el código que te compartieron.</p></div>`}
 
   <div class="card">
-    <h2>Crear grupo</h2>
+    <h2>Crear otro grupo</h2>
+    <p class="small muted">Puedes estar en varios grupos a la vez: crear o unirte a uno no te saca de los otros.</p>
     <form id="cg" class="row"><input name="name" required maxlength="60" placeholder="Ej: Los del fútbol"><button class="btn">Crear</button></form>
     <h2 style="margin-top:16px">Unirme con código</h2>
     <form id="jg" class="row"><input name="code" required maxlength="10" placeholder="ABC123" style="text-transform:uppercase"><button class="btn ghost">Unirme</button></form>
@@ -2014,7 +2014,7 @@ async function viewFriends() {
   };
   if (!g) return;
 
-  $('#gsel').onchange = (ev) => { state.groupId = ev.target.value; localStorage.setItem('af_group', state.groupId); route(); };
+  $$('[data-gid]').forEach((b) => (b.onclick = () => { state.groupId = b.dataset.gid; localStorage.setItem('af_group', state.groupId); route(); }));
   $$('.tabs button').forEach((b) => (b.onclick = () => { state.groupRange = +b.dataset.r; route(); }));
   $('#share').onclick = async () => {
     const text = `¡Únete a mi grupo "${g.name}" en Amigos Fit! 💪\n1) Entra a ${BASE_URL}\n2) Crea tu cuenta\n3) En Amigos → "Unirme con código": ${g.invite_code}`;
