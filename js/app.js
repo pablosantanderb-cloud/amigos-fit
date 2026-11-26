@@ -143,7 +143,7 @@ async function renderSyncCard() {
 }
 
 const SHORTCUT_NAME = 'Amigos Fit Salud';
-const APP_V = 71;
+const APP_V = 72;
 // Saltos automáticos al Atajo: se pueden apagar (Perfil) y quedan registrados para diagnosticar
 // Apagado por defecto: al terminar el Atajo, iOS se queda en la app Atajos (no puede volver solo a una app web)
 const autoSyncOn = () => lsStr('afAutoSync2') === '1';
@@ -268,7 +268,7 @@ const mealKey = (m) => (m === 'colacion' || m === 'otro' ? 'snack' : m);
 const COLORS = { kcal: '#199407', prot: '#2563eb', carb: '#d97706', fat: '#db2777', target: '#6b7280' };
 // Color fijo de cada amigo, como el logo: Luchin verde, Pabluma amarillo, El kacho rojo
 // Se reconoce por el comienzo del nombre, así sigue funcionando si alguien se cambia el apodo (Luchin → Luchimi)
-const PERSON_COLORS = [[/^luch/, '#16a34a'], [/^pab/, '#eab308'], [/kach/, '#ef4444']];
+const PERSON_COLORS = [[/^luch/, '#16a34a'], [/^pab/, '#eab308'], [/kach/, '#ef4444'], [/^constanza/, '#c4b5fd']];
 function personColor(name = '', i = 0) {
   const n = String(name).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const hit = PERSON_COLORS.find(([re]) => re.test(n));
